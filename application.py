@@ -1,9 +1,5 @@
 """
-Web application module.
-
-This module provides the core web application functionality for handling HTTP requests,
-routing, and processing through middleware and processors.
-
+Web application
 (from web.py)
 """
 
@@ -38,9 +34,6 @@ class application:
     """
     Application to delegate requests based on path.
 
-    This class handles HTTP request routing and processing for web applications.
-    
-    Examples:
         >>> urls = ("/hello", "hello")
         >>> app = application(urls, globals())
         >>> class hello:
@@ -53,14 +46,6 @@ class application:
     # PY3DOCTEST: b'hello'
 
     def __init__(self, mapping=(), fvars={}, autoreload=None):
-        """
-        Initialize the application with URL mappings and variables.
-        
-        Args:
-            mapping (tuple): Tuple of URL patterns and corresponding handlers.
-            fvars (dict): Dictionary of global variables.
-            autoreload (bool): Whether to enable auto-reloading during development.
-        """
         if autoreload is None:
             autoreload = web.config.get("debug", False)
         self.init_mapping(mapping)
@@ -80,7 +65,7 @@ class application:
                 return file and os.path.splitext(os.path.basename(file))[0]
 
             def modname(fvars):
-                """Find name of the module name from fvars."""
+                """find name of the module name from fvars."""
                 file, name = fvars.get("__file__"), fvars.get("__name__")
                 if file is None or name is None:
                     return None
@@ -95,7 +80,7 @@ class application:
             module_name = modname(fvars)
 
             def reload_mapping():
-                """Loadhook to reload mapping and fvars."""
+                """loadhook to reload mapping and fvars."""
                 mod = __import__(module_name, None, None, [""])
                 mapping = getattr(mod, mapping_name, None)
                 if mapping:
@@ -119,21 +104,9 @@ class application:
                     pass
 
     def _load(self):
-        """
-        Load the application into the context stack.
-        
-        This method is called when a request is being processed to set up
-        the application context.
-        """
         web.ctx.app_stack.append(self)
 
     def _unload(self):
-        """
-        Unload the application from the context stack.
-        
-        This method is called after a request has been processed to clean up
-        the application context.
-        """
         web.ctx.app_stack = web.ctx.app_stack[:-1]
 
         if web.ctx.app_stack:
@@ -146,45 +119,20 @@ class application:
                 web.ctx.fullpath = oldctx.fullpath
 
     def _cleanup(self):
-        """
-        Clean up thread-local state.
-        
-        Threads can be recycled by WSGI servers. Clearing up all thread-local 
-        state to avoid interfering with subsequent requests.
-        """
+        # Threads can be recycled by WSGI servers.
+        # Clearing up all thread-local state to avoid interefereing with subsequent requests.
         utils.ThreadedDict.clear_all()
 
     def init_mapping(self, mapping):
-        """
-        Initialize URL mapping from a tuple of patterns and handlers.
-        
-        Args:
-            mapping (tuple): Tuple of URL patterns and corresponding handlers.
-        """
         self.mapping = list(utils.group(mapping, 2))
 
     def add_mapping(self, pattern, classname):
-        """
-        Add a new URL pattern and handler to the application.
-        
-        Args:
-            pattern (str): Regular expression pattern for URL matching.
-            classname (str): Handler class name or application instance.
-        """
         self.mapping.append((pattern, classname))
 
     def add_processor(self, processor):
         """
         Adds a processor to the application.
-        
-        Processors are functions that wrap request handling and can modify
-        the request flow. They are executed in reverse order.
-        
-        Args:
-            processor (callable): A processor function that takes a handler 
-                                  and returns a modified handler.
-        
-        Examples:
+
             >>> urls = ("/(.*)", "echo")
             >>> app = application(urls, globals())
             >>> class echo:
@@ -210,23 +158,9 @@ class application:
         https=False,
         **kw,
     ):
-        """
-        Makes request to this application for the specified path and method.
+        """Makes request to this application for the specified path and method.
         Response will be a storage object with data, status and headers.
-        
-        Args:
-            localpart (str): The URL path to request.
-            method (str): HTTP method (GET, POST, etc.).
-            data (dict or str): Request data.
-            host (str): Host address for the request.
-            headers (dict): HTTP headers to include in the request.
-            https (bool): Whether to use HTTPS.
-            **kw: Additional keyword arguments.
-            
-        Returns:
-            storage: Response object with data, status and headers attributes.
-            
-        Examples:
+
             >>> urls = ("/hello", "hello")
             >>> app = application(urls, globals())
             >>> class hello:
@@ -269,6 +203,7 @@ class application:
             ...      'User-Agent': 'a small jumping bean/1.0 (compatible)'
             ... }).data
             'your user-agent is a small jumping bean/1.0 (compatible)'
+
         """
         # PY3DOCTEST: b'hello'
         # PY3DOCTEST: b'your user-agent is a small jumping bean/1.0 (compatible)'
@@ -325,31 +260,13 @@ class application:
         return response
 
     def browser(self):
-        """
-        Create a browser instance for testing.
-        
-        Returns:
-            AppBrowser: Browser instance for simulating web requests.
-        """
         return browser.AppBrowser(self)
 
     def handle(self):
-        """
-        Handle the current request by matching URL patterns and delegating to handlers.
-        
-        Returns:
-            The result of the handler function call.
-        """
         fn, args = self._match(self.mapping, web.ctx.path)
         return self._delegate(fn, self.fvars, args)
 
     def handle_with_processors(self):
-        """
-        Handle request with all registered processors applied.
-        
-        Returns:
-            The result of the processed request handling.
-        """
         def process(processors):
             try:
                 if processors:
@@ -369,15 +286,7 @@ class application:
         return process(self.processors)
 
     def wsgifunc(self, *middleware):
-        """
-        Returns a WSGI-compatible function for this application.
-        
-        Args:
-            *middleware: WSGI middleware to apply to the application.
-            
-        Returns:
-            callable: A WSGI application function.
-        """
+        """Returns a WSGI-compatible function for this application."""
 
         def peep(iterator):
             """Peeps into an iterator by doing an iteration
@@ -443,21 +352,11 @@ class application:
 
         `middleware` is a list of WSGI middleware which is applied to the resulting WSGI
         function.
-        
-        Args:
-            *middleware: WSGI middleware to apply to the application.
-            
-        Returns:
-            None: This method typically runs indefinitely until stopped.
         """
         return wsgi.runwsgi(self.wsgifunc(*middleware))
 
     def stop(self):
-        """
-        Stops the http server started by run.
-        
-        This method stops any HTTP server that was started by the run() method.
-        """
+        """Stops the http server started by run."""
         if httpserver.server:
             httpserver.server.stop()
             httpserver.server = None
@@ -468,12 +367,6 @@ class application:
         There you can just do:
 
             main = app.cgirun()
-            
-        Args:
-            *middleware: WSGI middleware to apply to the application.
-            
-        Returns:
-            callable: A CGI handler function.
         """
         wsgiapp = self.wsgifunc(*middleware)
 
@@ -504,12 +397,6 @@ class application:
               script: code.app
 
         Make sure that the app variable is globally accessible
-            
-        Args:
-            *middleware: WSGI middleware to apply to the application.
-            
-        Returns:
-            callable: A WSGI application function for Google App Engine.
         """
         wsgiapp = self.wsgifunc(*middleware)
         try:
@@ -535,12 +422,7 @@ class application:
             return wsgiref.handlers.CGIHandler().run(wsgiapp)
 
     def load(self, env):
-        """
-        Initializes ctx using env.
-        
-        Args:
-            env (dict): WSGI environment dictionary.
-        """
+        """Initializes ctx using env."""
         ctx = web.ctx
         ctx.clear()
         ctx.status = "200 OK"
@@ -595,17 +477,6 @@ class application:
         ctx.app_stack = []
 
     def _delegate(self, f, fvars, args=[]):
-        """
-        Delegate request to appropriate handler based on the matched pattern.
-        
-        Args:
-            f: The matched handler (class, function, or string).
-            fvars (dict): Global variables dictionary.
-            args (list): Arguments extracted from URL matching.
-            
-        Returns:
-            The result of the handler call.
-        """
         def handle_class(cls):
             meth = web.ctx.method
             if meth == "HEAD" and not hasattr(cls, meth):
@@ -642,16 +513,6 @@ class application:
             return web.notfound()
 
     def _match(self, mapping, value):
-        """
-        Match URL patterns against the request path.
-        
-        Args:
-            mapping (list): List of URL pattern and handler tuples.
-            value (str): The URL path to match against.
-            
-        Returns:
-            tuple: A tuple of (handler, args) if matched, otherwise (None, None).
-        """
         for pat, what in mapping:
             if isinstance(what, application):
                 if value.startswith(pat):
@@ -669,15 +530,11 @@ class application:
         return None, None
 
     def _delegate_sub_application(self, dir, app):
-        """
-        Delegate request to sub application rooted at the directory.
-        
-        Args:
-            dir (str): The directory path prefix.
-            app (application): The sub-application instance.
-            
-        Returns:
-            The result of handling the sub-application request.
+        """Deletes request to sub application `app` rooted at the directory `dir`.
+        The home, homepath, path and fullpath values in web.ctx are updated to mimic request
+        to the subapp and are restored after it is handled.
+
+        @@Any issues with when used with yield?
         """
         web.ctx._oldctx = web.storage(web.ctx)
         web.ctx.home += dir
@@ -687,24 +544,13 @@ class application:
         return app.handle_with_processors()
 
     def get_parent_app(self):
-        """
-        Get the parent application from the context stack.
-        
-        Returns:
-            application: The parent application instance or None if not found.
-        """
         if self in web.ctx.app_stack:
             index = web.ctx.app_stack.index(self)
             if index > 0:
                 return web.ctx.app_stack[index - 1]
 
     def notfound(self):
-        """
-        Returns HTTPError with '404 not found' message.
-        
-        Returns:
-            HTTPError: A 404 Not Found error.
-        """
+        """Returns HTTPError with '404 not found' message"""
         parent = self.get_parent_app()
         if parent:
             return parent.notfound()
@@ -712,12 +558,7 @@ class application:
             return web._NotFound()
 
     def internalerror(self):
-        """
-        Returns HTTPError with '500 internal error' message.
-        
-        Returns:
-            HTTPError: A 500 Internal Server Error.
-        """
+        """Returns HTTPError with '500 internal error' message"""
         parent = self.get_parent_app()
         if parent:
             return parent.internalerror()
@@ -728,15 +569,6 @@ class application:
 
 
 def with_metaclass(mcls):
-    """
-    Create a metaclass decorator for Python 2/3 compatibility.
-    
-    Args:
-        mcls: The metaclass to use.
-        
-    Returns:
-        callable: A decorator function.
-    """
     def decorator(cls):
         body = vars(cls).copy()
         # clean out class body
@@ -748,11 +580,9 @@ def with_metaclass(mcls):
 
 
 class auto_application(application):
-    """
-    Application similar to `application` but urls are constructed
+    """Application similar to `application` but urls are constructed
     automatically using metaclass.
-    
-    Examples:
+
         >>> app = auto_application()
         >>> class hello(app.page):
         ...     def GET(self): return "hello, world"
@@ -770,9 +600,6 @@ class auto_application(application):
     # PY3DOCTEST: b'foo'
 
     def __init__(self):
-        """
-        Initialize the auto application.
-        """
         application.__init__(self)
 
         class metapage(type):
@@ -797,10 +624,9 @@ subdir_application = application
 
 
 class subdomain_application(application):
-    """
+    r"""
     Application to delegate requests based on the host.
-    
-    Examples:
+
         >>> urls = ("/hello", "hello")
         >>> app = application(urls, globals())
         >>> class hello:
@@ -821,27 +647,11 @@ class subdomain_application(application):
     # PY3DOCTEST: b'not found'
 
     def handle(self):
-        """
-        Handle the current request by matching host patterns.
-        
-        Returns:
-            The result of the handler function call.
-        """
         host = web.ctx.host.split(":")[0]  # strip port
         fn, args = self._match(self.mapping, host)
         return self._delegate(fn, self.fvars, args)
 
     def _match(self, mapping, value):
-        """
-        Match host patterns against the request host.
-        
-        Args:
-            mapping (list): List of host pattern and handler tuples.
-            value (str): The host to match against.
-            
-        Returns:
-            tuple: A tuple of (handler, args) if matched, otherwise (None, None).
-        """
         for pat, what in mapping:
             if isinstance(what, str):
                 what, result = utils.re_subm("^" + pat + "$", what, value)
@@ -856,14 +666,7 @@ class subdomain_application(application):
 def loadhook(h):
     """
     Converts a load hook into an application processor.
-    
-    Args:
-        h (callable): The load hook function to convert.
-        
-    Returns:
-        callable: A processor function that wraps the hook.
-        
-    Examples:
+
         >>> app = auto_application()
         >>> def f(): "something done before handling request"
         ...
@@ -880,14 +683,7 @@ def loadhook(h):
 def unloadhook(h):
     """
     Converts an unload hook into an application processor.
-    
-    Args:
-        h (callable): The unload hook function to convert.
-        
-    Returns:
-        callable: A processor function that wraps the hook.
-        
-    Examples:
+
         >>> app = auto_application()
         >>> def f(): "something done after handling request"
         ...
@@ -944,12 +740,6 @@ def autodelegate(prefix=""):
 
     If a user visits `/prefs/password/change` then `GET_password(self, '/change')`
     is called.
-    
-    Args:
-        prefix (str): The method name prefix to use for delegation.
-        
-    Returns:
-        callable: A delegate function that handles the routing.
     """
 
     def internal(self, arg):
@@ -973,8 +763,7 @@ def autodelegate(prefix=""):
 
 
 class Reloader:
-    """
-    Checks to see if any loaded modules have changed on disk and,
+    """Checks to see if any loaded modules have changed on disk and,
     if so, reloads them.
     """
 
@@ -985,26 +774,14 @@ class Reloader:
         SUFFIX = ".pyc"
 
     def __init__(self):
-        """
-        Initialize the reloader with an empty modification time cache.
-        """
         self.mtimes = {}
 
     def __call__(self):
-        """
-        Check all loaded modules for changes and reload if necessary.
-        """
         sys_modules = list(sys.modules.values())
         for mod in sys_modules:
             self.check(mod)
 
     def check(self, mod):
-        """
-        Check a specific module for modifications.
-        
-        Args:
-            mod: The module to check.
-        """
         # jython registers java packages as modules but they either
         # don't have a __file__ attribute or its value is None
         if not (mod and hasattr(mod, "__file__") and mod.__file__):

@@ -1,9 +1,6 @@
 """
 Web API (wrapper around WSGI)
 (from web.py)
-
-This module provides a web framework built on top of WSGI with utilities for
-handling HTTP requests and responses.
 """
 
 import pprint
@@ -78,34 +75,12 @@ config = storage()
 config.__doc__ = """
 A configuration object for various aspects of web.py.
 
-Args:
-    debug (bool): When True, enables reloading, disables template caching and
-        sets internalerror to debugerror.
-
-Examples:
-    >>> config.debug = True
-    >>> print(config.debug)
-    True
+`debug`
+   : when True, enables reloading, disabled template caching and sets internalerror to debugerror.
 """
 
 
 class HTTPError(Exception):
-    """
-    Base exception class for HTTP errors.
-
-    Args:
-        status (str): The HTTP status code and message (e.g., "404 Not Found").
-        headers (dict): HTTP headers to include in the response.
-        data (str): The response body data.
-
-    Examples:
-        >>> try:
-        ...     raise HTTPError("404 Not Found")
-        ... except HTTPError as e:
-        ...     print(e.args[0])
-        '404 Not Found'
-    """
-
     def __init__(self, status, headers={}, data=""):
         ctx.status = status
         for k, v in headers.items():
@@ -115,23 +90,6 @@ class HTTPError(Exception):
 
 
 def _status_code(status, data=None, classname=None, docstring=None):
-    """
-    Creates a new HTTP status code class.
-
-    Args:
-        status (str): The HTTP status code and message (e.g., "200 OK").
-        data (str): The default response body for this status.
-        classname (str): The name of the class to create.
-        docstring (str): The docstring for the new class.
-
-    Returns:
-        type: A new HTTPError subclass for the given status code.
-
-    Examples:
-        >>> status_class = _status_code("201 Created")
-        >>> print(status_class.__name__)
-        'Created'
-    """
     if data is None:
         data = status.split(" ", 1)[1]
     classname = status.split(" ", 1)[1].replace(
@@ -155,30 +113,13 @@ nocontent = NoContent = _status_code("204 No Content")
 
 
 class Redirect(HTTPError):
-    """
-    A `301 Moved Permanently` redirect.
-
-    Args:
-        url (str): The URL to redirect to.
-        status (str): The HTTP status code for the redirect (default: "301 Moved Permanently").
-        absolute (bool): Whether to use an absolute URL (default: False).
-
-    Examples:
-        >>> redirect = Redirect("/new-page")
-        >>> print(redirect.args[0])
-        '301 Moved Permanently'
-    """
+    """A `301 Moved Permanently` redirect."""
 
     def __init__(self, url, status="301 Moved Permanently", absolute=False):
         """
         Returns a `status` redirect to the new URL.
         `url` is joined with the base URL so that things like
         `redirect("about") will work properly.
-
-        Args:
-            url (str): The URL to redirect to.
-            status (str): The HTTP status code for the redirect.
-            absolute (bool): Whether to use an absolute URL.
         """
         newloc = urljoin(ctx.path, url)
 
@@ -197,18 +138,7 @@ redirect = Redirect
 
 
 class Found(Redirect):
-    """
-    A `302 Found` redirect.
-
-    Args:
-        url (str): The URL to redirect to.
-        absolute (bool): Whether to use an absolute URL (default: False).
-
-    Examples:
-        >>> found = Found("/new-page")
-        >>> print(found.args[0])
-        '302 Found'
-    """
+    """A `302 Found` redirect."""
 
     def __init__(self, url, absolute=False):
         Redirect.__init__(self, url, "302 Found", absolute=absolute)
@@ -218,18 +148,7 @@ found = Found
 
 
 class SeeOther(Redirect):
-    """
-    A `303 See Other` redirect.
-
-    Args:
-        url (str): The URL to redirect to.
-        absolute (bool): Whether to use an absolute URL (default: False).
-
-    Examples:
-        >>> see_other = SeeOther("/new-page")
-        >>> print(see_other.args[0])
-        '303 See Other'
-    """
+    """A `303 See Other` redirect."""
 
     def __init__(self, url, absolute=False):
         Redirect.__init__(self, url, "303 See Other", absolute=absolute)
@@ -239,14 +158,7 @@ seeother = SeeOther
 
 
 class NotModified(HTTPError):
-    """
-    A `304 Not Modified` status.
-
-    Examples:
-        >>> not_modified = NotModified()
-        >>> print(not_modified.args[0])
-        '304 Not Modified'
-    """
+    """A `304 Not Modified` status."""
 
     def __init__(self):
         HTTPError.__init__(self, "304 Not Modified")
@@ -256,18 +168,7 @@ notmodified = NotModified
 
 
 class TempRedirect(Redirect):
-    """
-    A `307 Temporary Redirect` redirect.
-
-    Args:
-        url (str): The URL to redirect to.
-        absolute (bool): Whether to use an absolute URL (default: False).
-
-    Examples:
-        >>> temp_redirect = TempRedirect("/new-page")
-        >>> print(temp_redirect.args[0])
-        '307 Temporary Redirect'
-    """
+    """A `307 Temporary Redirect` redirect."""
 
     def __init__(self, url, absolute=False):
         Redirect.__init__(self, url, "307 Temporary Redirect", absolute=absolute)
@@ -277,17 +178,7 @@ tempredirect = TempRedirect
 
 
 class BadRequest(HTTPError):
-    """
-    `400 Bad Request` error.
-
-    Args:
-        message (str): The error message (default: "bad request").
-
-    Examples:
-        >>> bad_request = BadRequest()
-        >>> print(bad_request.args[0])
-        '400 Bad Request'
-    """
+    """`400 Bad Request` error."""
 
     message = "bad request"
 
@@ -301,17 +192,7 @@ badrequest = BadRequest
 
 
 class Unauthorized(HTTPError):
-    """
-    `401 Unauthorized` error.
-
-    Args:
-        message (str): The error message (default: "unauthorized").
-
-    Examples:
-        >>> unauthorized = Unauthorized()
-        >>> print(unauthorized.args[0])
-        '401 Unauthorized'
-    """
+    """`401 Unauthorized` error."""
 
     message = "unauthorized"
 
@@ -325,17 +206,7 @@ unauthorized = Unauthorized
 
 
 class Forbidden(HTTPError):
-    """
-    `403 Forbidden` error.
-
-    Args:
-        message (str): The error message (default: "forbidden").
-
-    Examples:
-        >>> forbidden = Forbidden()
-        >>> print(forbidden.args[0])
-        '403 Forbidden'
-    """
+    """`403 Forbidden` error."""
 
     message = "forbidden"
 
@@ -349,17 +220,7 @@ forbidden = Forbidden
 
 
 class _NotFound(HTTPError):
-    """
-    `404 Not Found` error.
-
-    Args:
-        message (str): The error message (default: "not found").
-
-    Examples:
-        >>> not_found = _NotFound()
-        >>> print(not_found.args[0])
-        '404 Not Found'
-    """
+    """`404 Not Found` error."""
 
     message = "not found"
 
@@ -370,20 +231,7 @@ class _NotFound(HTTPError):
 
 
 def NotFound(message=None):
-    """
-    Returns HTTPError with '404 Not Found' error from the active application.
-
-    Args:
-        message (str): The error message to display (optional).
-
-    Returns:
-        HTTPError: A 404 Not Found error.
-
-    Examples:
-        >>> error = NotFound()
-        >>> print(error.args[0])
-        '404 Not Found'
-    """
+    """Returns HTTPError with '404 Not Found' error from the active application."""
     if message:
         return _NotFound(message)
     elif ctx.get("app_stack"):
@@ -396,17 +244,7 @@ notfound = NotFound
 
 
 class NoMethod(HTTPError):
-    """
-    A `405 Method Not Allowed` error.
-
-    Args:
-        cls (object): The class to check for allowed methods (optional).
-
-    Examples:
-        >>> no_method = NoMethod()
-        >>> print(no_method.args[0])
-        '405 Method Not Allowed'
-    """
+    """A `405 Method Not Allowed` error."""
 
     message = "method not allowed"
 
@@ -427,17 +265,7 @@ nomethod = NoMethod
 
 
 class NotAcceptable(HTTPError):
-    """
-    `406 Not Acceptable` error.
-
-    Args:
-        message (str): The error message (default: "not acceptable").
-
-    Examples:
-        >>> not_acceptable = NotAcceptable()
-        >>> print(not_acceptable.args[0])
-        '406 Not Acceptable'
-    """
+    """`406 Not Acceptable` error."""
 
     message = "not acceptable"
 
@@ -451,17 +279,7 @@ notacceptable = NotAcceptable
 
 
 class Conflict(HTTPError):
-    """
-    `409 Conflict` error.
-
-    Args:
-        message (str): The error message (default: "conflict").
-
-    Examples:
-        >>> conflict = Conflict()
-        >>> print(conflict.args[0])
-        '409 Conflict'
-    """
+    """`409 Conflict` error."""
 
     message = "conflict"
 
@@ -475,17 +293,7 @@ conflict = Conflict
 
 
 class Gone(HTTPError):
-    """
-    `410 Gone` error.
-
-    Args:
-        message (str): The error message (default: "gone").
-
-    Examples:
-        >>> gone = Gone()
-        >>> print(gone.args[0])
-        '410 Gone'
-    """
+    """`410 Gone` error."""
 
     message = "gone"
 
@@ -499,17 +307,7 @@ gone = Gone
 
 
 class PreconditionFailed(HTTPError):
-    """
-    `412 Precondition Failed` error.
-
-    Args:
-        message (str): The error message (default: "precondition failed").
-
-    Examples:
-        >>> precondition_failed = PreconditionFailed()
-        >>> print(precondition_failed.args[0])
-        '412 Precondition Failed'
-    """
+    """`412 Precondition Failed` error."""
 
     message = "precondition failed"
 
@@ -523,17 +321,7 @@ preconditionfailed = PreconditionFailed
 
 
 class UnsupportedMediaType(HTTPError):
-    """
-    `415 Unsupported Media Type` error.
-
-    Args:
-        message (str): The error message (default: "unsupported media type").
-
-    Examples:
-        >>> unsupported_media_type = UnsupportedMediaType()
-        >>> print(unsupported_media_type.args[0])
-        '415 Unsupported Media Type'
-    """
+    """`415 Unsupported Media Type` error."""
 
     message = "unsupported media type"
 
@@ -547,17 +335,7 @@ unsupportedmediatype = UnsupportedMediaType
 
 
 class _UnavailableForLegalReasons(HTTPError):
-    """
-    `451 Unavailable For Legal Reasons` error.
-
-    Args:
-        message (str): The error message (default: "unavailable for legal reasons").
-
-    Examples:
-        >>> unavailable_for_legal_reasons = _UnavailableForLegalReasons()
-        >>> print(unavailable_for_legal_reasons.args[0])
-        '451 Unavailable For Legal Reasons'
-    """
+    """`451 Unavailable For Legal Reasons` error."""
 
     message = "unavailable for legal reasons"
 
@@ -568,20 +346,7 @@ class _UnavailableForLegalReasons(HTTPError):
 
 
 def UnavailableForLegalReasons(message=None):
-    """
-    Returns HTTPError with '415 Unavailable For Legal Reasons' error from the active application.
-
-    Args:
-        message (str): The error message to display (optional).
-
-    Returns:
-        HTTPError: A 451 Unavailable For Legal Reasons error.
-
-    Examples:
-        >>> error = UnavailableForLegalReasons()
-        >>> print(error.args[0])
-        '451 Unavailable For Legal Reasons'
-    """
+    """Returns HTTPError with '415 Unavailable For Legal Reasons' error from the active application."""
     if message:
         return _UnavailableForLegalReasons(message)
     elif ctx.get("app_stack"):
@@ -594,17 +359,7 @@ unavailableforlegalreasons = UnavailableForLegalReasons
 
 
 class _InternalError(HTTPError):
-    """
-    500 Internal Server Error`.
-
-    Args:
-        message (str): The error message (default: "internal server error").
-
-    Examples:
-        >>> internal_error = _InternalError()
-        >>> print(internal_error.args[0])
-        '500 Internal Server Error'
-    """
+    """500 Internal Server Error`."""
 
     message = "internal server error"
 
@@ -615,20 +370,7 @@ class _InternalError(HTTPError):
 
 
 def InternalError(message=None):
-    """
-    Returns HTTPError with '500 internal error' error from the active application.
-
-    Args:
-        message (str): The error message to display (optional).
-
-    Returns:
-        HTTPError: A 500 Internal Server Error.
-
-    Examples:
-        >>> error = InternalError()
-        >>> print(error.args[0])
-        '500 Internal Server Error'
-    """
+    """Returns HTTPError with '500 internal error' error from the active application."""
     if message:
         return _InternalError(message)
     elif ctx.get("app_stack"):
@@ -646,19 +388,6 @@ def header(hdr, value, unique=False):
 
     If `unique` is True and a header with that name already exists,
     it doesn't add a new one.
-
-    Args:
-        hdr (str): The header name.
-        value (str): The header value.
-        unique (bool): Whether to only add the header if it doesn't exist yet.
-
-    Raises:
-        ValueError: If the header or value contains invalid characters.
-
-    Examples:
-        >>> header("Content-Type", "text/html")
-        >>> print(ctx.headers[-1])
-        ('Content-Type', 'text/html')
     """
     hdr, value = safestr(hdr), safestr(value)
     # protection against HTTP response splitting attack
@@ -673,21 +402,7 @@ def header(hdr, value, unique=False):
 
 
 def rawinput(method=None):
-    """
-    Returns storage object with GET or POST arguments.
-
-    Args:
-        method (str): The HTTP method to get input for ("both", "get", "post", "put", "patch").
-
-    Returns:
-        storage: A storage object containing the request parameters.
-
-    Examples:
-        >>> # Get all input
-        >>> input_data = rawinput()
-        >>> # Get only POST data
-        >>> post_data = rawinput("post")
-    """
+    """Returns storage object with GET or POST arguments."""
     method = method or "both"
 
     def dictify(fs):
@@ -741,21 +456,7 @@ def rawinput(method=None):
 def input(*requireds, **defaults):
     """
     Returns a `storage` object with the GET and POST arguments.
-
     See `storify` for how `requireds` and `defaults` work.
-
-    Args:
-        *requireds: Required parameter names.
-        **defaults: Default values for parameters.
-
-    Returns:
-        storage: A storage object containing the request parameters.
-
-    Examples:
-        >>> # Get all input
-        >>> input_data = input()
-        >>> # Get input with defaults
-        >>> input_with_defaults = input(_method="post", name="default_name")
     """
     _method = defaults.pop("_method", "both")
     out = rawinput(_method)
@@ -767,17 +468,7 @@ def input(*requireds, **defaults):
 
 
 def data():
-    """
-    Returns the data sent with the request.
-
-    Returns:
-        bytes: The raw request body data.
-
-    Examples:
-        >>> request_data = data()
-        >>> print(type(request_data))
-        <class 'bytes'>
-    """
+    """Returns the data sent with the request."""
     if "data" not in ctx:
         if ctx.env.get("HTTP_TRANSFER_ENCODING") == "chunked":
             ctx.data = ctx.env["wsgi.input"].read()
@@ -797,24 +488,7 @@ def setcookie(
     path=None,
     samesite=None,
 ):
-    """
-    Sets a cookie.
-
-    Args:
-        name (str): The cookie name.
-        value (str): The cookie value.
-        expires (str or int): Expiration date for the cookie.
-        domain (str): Domain for which the cookie is valid.
-        secure (bool): Whether the cookie should only be sent over HTTPS.
-        httponly (bool): Whether the cookie should be HTTP-only.
-        path (str): Path for which the cookie is valid.
-        samesite (str): SameSite attribute value ("strict", "lax", or "none").
-
-    Examples:
-        >>> setcookie("session_id", "abc123")
-        >>> print(ctx.headers[-1])
-        ('Set-Cookie', 'session_id=abc123; Path=/')
-    """
+    """Sets a cookie."""
     morsel = Morsel()
     name, value = safestr(name), safestr(value)
     morsel.set(name, value, quote(value))
@@ -835,26 +509,30 @@ def setcookie(
 
 
 def parse_cookies(http_cookie):
-    """
-    Parse a HTTP_COOKIE header and return dict of cookie names and decoded values.
+    r"""Parse a HTTP_COOKIE header and return dict of cookie names and decoded values.
 
-    Args:
-        http_cookie (str): The HTTP_COOKIE header string.
+    >>> sorted(parse_cookies('').items())
+    []
+    >>> sorted(parse_cookies('a=1').items())
+    [('a', '1')]
+    >>> sorted(parse_cookies('a=1%202').items())
+    [('a', '1 2')]
+    >>> sorted(parse_cookies('a=Z%C3%A9Z').items())
+    [('a', 'Z\xc3\xa9Z')]
+    >>> sorted(parse_cookies('a=1; b=2; c=3').items())
+    [('a', '1'), ('b', '2'), ('c', '3')]
 
-    Returns:
-        dict: A dictionary mapping cookie names to their decoded values.
+    # TODO: cclauss re-enable this test
+    # >>> sorted(parse_cookies('a=1; b=w("x")|y=z; c=3').items())
+    # [('a', '1'), ('b', 'w('), ('c', '3')]
 
-    Examples:
-        >>> sorted(parse_cookies('').items())
-        []
-        >>> sorted(parse_cookies('a=1').items())
-        [('a', '1')]
-        >>> sorted(parse_cookies('a=1%202').items())
-        [('a', '1 2')]
-        >>> sorted(parse_cookies('a=Z%C3%A9Z').items())
-        [('a', 'Z\xc3\xa9Z')]
-        >>> sorted(parse_cookies('a=1; b=2; c=3').items())
-        [('a', '1'), ('b', '2'), ('c', '3')]
+    >>> sorted(parse_cookies('a=1; b=w(%22x%22)|y=z; c=3').items())
+    [('a', '1'), ('b', 'w("x")|y=z'), ('c', '3')]
+
+    >>> sorted(parse_cookies('keebler=E=mc2').items())
+    [('keebler', 'E=mc2')]
+    >>> sorted(parse_cookies(r'keebler="E=mc2; L=\"Loves\"; fudge=\012;"').items())
+    [('keebler', 'E=mc2; L="Loves"; fudge=\n;')]
     """
     # print "parse_cookies"
     if '"' in http_cookie:
@@ -884,8 +562,7 @@ def parse_cookies(http_cookie):
 
 
 def cookies(*requireds, **defaults):
-    """
-    Returns a `storage` object with all the request cookies in it.
+    """Returns a `storage` object with all the request cookies in it.
 
     See `storify` for how `requireds` and `defaults` work.
 
@@ -893,19 +570,6 @@ def cookies(*requireds, **defaults):
     the cookies it can.
 
     The values are converted to unicode if _unicode=True is passed.
-
-    Args:
-        *requireds: Required cookie names.
-        **defaults: Default values for cookies.
-
-    Returns:
-        storage: A storage object containing the request cookies.
-
-    Examples:
-        >>> # Get all cookies
-        >>> all_cookies = cookies()
-        >>> # Get specific cookies with defaults
-        >>> specific_cookies = cookies("session_id", user="guest")
     """
     # parse cookie string and cache the result for next time.
     if "_parsed_cookies" not in ctx:
@@ -922,12 +586,6 @@ def cookies(*requireds, **defaults):
 def debug(*args):
     """
     Prints a prettyprinted version of `args` to stderr.
-
-    Args:
-        *args: Arguments to print.
-
-    Examples:
-        >>> debug("Hello", {"key": "value"})
     """
     try:
         out = ctx.environ["wsgi.errors"]
@@ -939,12 +597,6 @@ def debug(*args):
 
 
 def _debugwrite(x):
-    """
-    Writes to the debug output stream.
-
-    Args:
-        x (str): The string to write.
-    """
     try:
         out = ctx.environ["wsgi.errors"]
     except:
@@ -959,47 +611,41 @@ ctx = context = threadeddict()
 ctx.__doc__ = """
 A `storage` object containing various information about the request:
 
-environ (aka env)
+`environ` (aka `env`)
    : A dictionary containing the standard WSGI environment variables.
 
-host
+`host`
    : The domain (`Host` header) requested by the user.
 
-home
+`home`
    : The base path for the application.
 
-ip
+`ip`
    : The IP address of the requester.
 
-method
+`method`
    : The HTTP method used.
 
-path
+`path`
    : The path request.
 
-query
+`query`
    : If there are no query arguments, the empty string. Otherwise, a `?` followed
      by the query string.
 
-fullpath
+`fullpath`
    : The full path requested, including query arguments (`== path + query`).
 
 ### Response Data
 
-status (default: "200 OK")
+`status` (default: "200 OK")
    : The status code to be used in the response.
 
-headers
+`headers`
    : A list of 2-tuples to be used in the response.
 
-output
+`output`
    : A string to be used as the response.
-
-Examples:
-    >>> print(ctx.method)
-    'GET'
-    >>> print(ctx.path)
-    '/'
 """
 
 if __name__ == "__main__":

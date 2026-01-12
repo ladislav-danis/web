@@ -8,7 +8,6 @@ import re
 import socket
 import time
 from urllib.parse import quote
-from typing import Tuple, Union, Optional
 
 __all__ = [
     "validipaddr",
@@ -25,17 +24,10 @@ __all__ = [
 ]
 
 
-def validip6addr(address: str) -> bool:
+def validip6addr(address):
     """
     Returns True if `address` is a valid IPv6 address.
 
-    Args:
-        address: The IP address string to validate.
-
-    Returns:
-        True if the address is a valid IPv6 address, False otherwise.
-
-    Examples:
         >>> validip6addr('::')
         True
         >>> validip6addr('aaaa:bbbb:cccc:dddd::1')
@@ -53,17 +45,10 @@ def validip6addr(address: str) -> bool:
     return True
 
 
-def validipaddr(address: str) -> bool:
+def validipaddr(address):
     """
     Returns True if `address` is a valid IPv4 address.
 
-    Args:
-        address: The IP address string to validate.
-
-    Returns:
-        True if the address is a valid IPv4 address, False otherwise.
-
-    Examples:
         >>> validipaddr('192.168.1.1')
         True
         >>> validipaddr('192.168. 1.1')
@@ -89,17 +74,10 @@ def validipaddr(address: str) -> bool:
     return True
 
 
-def validipport(port: str) -> bool:
+def validipport(port):
     """
     Returns True if `port` is a valid IPv4 port.
 
-    Args:
-        port: The port number as a string to validate.
-
-    Returns:
-        True if the port is a valid IPv4 port, False otherwise.
-
-    Examples:
         >>> validipport('9000')
         True
         >>> validipport('foo')
@@ -115,19 +93,10 @@ def validipport(port: str) -> bool:
     return True
 
 
-def validip(ip: str, defaultaddr: str = "0.0.0.0", defaultport: int = 8080) -> Tuple[str, int]:
+def validip(ip, defaultaddr="0.0.0.0", defaultport=8080):
     """
     Returns `(ip_address, port)` from string `ip_addr_port`
 
-    Args:
-        ip: The IP address and optional port as a string.
-        defaultaddr: Default IP address to use if not specified.
-        defaultport: Default port to use if not specified.
-
-    Returns:
-        A tuple of (ip_address, port).
-
-    Examples:
         >>> validip('1.2.3.4')
         ('1.2.3.4', 8080)
         >>> validip('80')
@@ -140,6 +109,7 @@ def validip(ip: str, defaultaddr: str = "0.0.0.0", defaultport: int = 8080) -> T
         ('::', 88)
         >>> validip('[::1]:80')
         ('::1', 80)
+
     """
     addr = defaultaddr
     port = defaultport
@@ -178,17 +148,10 @@ def validip(ip: str, defaultaddr: str = "0.0.0.0", defaultport: int = 8080) -> T
     return (addr, port)
 
 
-def validaddr(string_: str) -> Union[Tuple[str, int], str]:
+def validaddr(string_):
     """
     Returns either (ip_address, port) or "/path/to/socket" from string_
 
-    Args:
-        string_: The input string to parse.
-
-    Returns:
-        Either a tuple of (ip_address, port) or a socket path string.
-
-    Examples:
         >>> validaddr('/path/to/socket')
         '/path/to/socket'
         >>> validaddr('8000')
@@ -210,17 +173,10 @@ def validaddr(string_: str) -> Union[Tuple[str, int], str]:
         return validip(string_)
 
 
-def urlquote(val: Optional[str]) -> str:
+def urlquote(val):
     """
     Quotes a string for use in a URL.
 
-    Args:
-        val: The value to quote. Can be None.
-
-    Returns:
-        The quoted string, or empty string if input is None.
-
-    Examples:
         >>> urlquote('://?f=1&j=1')
         '%3A//%3Ff%3D1%26j%3D1'
         >>> urlquote(None)
@@ -235,17 +191,10 @@ def urlquote(val: Optional[str]) -> str:
     return quote(val)
 
 
-def httpdate(date_obj: datetime.datetime) -> str:
+def httpdate(date_obj):
     """
     Formats a datetime object for use in HTTP headers.
 
-    Args:
-        date_obj: The datetime object to format.
-
-    Returns:
-        A string representation of the datetime in HTTP date format.
-
-    Examples:
         >>> import datetime
         >>> httpdate(datetime.datetime(1970, 1, 1, 1, 1, 1))
         'Thu, 01 Jan 1970 01:01:01 GMT'
@@ -253,17 +202,10 @@ def httpdate(date_obj: datetime.datetime) -> str:
     return date_obj.strftime("%a, %d %b %Y %H:%M:%S GMT")
 
 
-def parsehttpdate(string_: str) -> Optional[datetime.datetime]:
+def parsehttpdate(string_):
     """
     Parses an HTTP date into a datetime object.
 
-    Args:
-        string_: The HTTP date string to parse.
-
-    Returns:
-        A datetime object if parsing succeeds, None otherwise.
-
-    Examples:
         >>> parsehttpdate('Thu, 01 Jan 1970 01:01:01 GMT')
         datetime.datetime(1970, 1, 1, 1, 1, 1)
     """
@@ -274,17 +216,10 @@ def parsehttpdate(string_: str) -> Optional[datetime.datetime]:
     return datetime.datetime(*t[:6])
 
 
-def htmlquote(text: str) -> str:
+def htmlquote(text):
     r"""
     Encodes `text` for raw use in HTML.
 
-    Args:
-        text: The text to encode.
-
-    Returns:
-        The HTML-encoded text.
-
-    Examples:
         >>> htmlquote(u"<'&\">")
         u'&lt;&#39;&amp;&quot;&gt;'
     """
@@ -296,17 +231,10 @@ def htmlquote(text: str) -> str:
     return text
 
 
-def htmlunquote(text: str) -> str:
+def htmlunquote(text):
     r"""
     Decodes `text` that's HTML quoted.
 
-    Args:
-        text: The HTML-encoded text to decode.
-
-    Returns:
-        The decoded text.
-
-    Examples:
         >>> htmlunquote(u'&lt;&#39;&amp;&quot;&gt;')
         u'<\'&">'
     """
@@ -318,17 +246,10 @@ def htmlunquote(text: str) -> str:
     return text
 
 
-def websafe(val: Optional[Union[str, bytes]]) -> str:
+def websafe(val):
     r"""
     Converts `val` so that it is safe for use in Unicode HTML.
 
-    Args:
-        val: The value to make safe for HTML. Can be None, string or bytes.
-
-    Returns:
-        A string that is safe for use in HTML.
-
-    Examples:
         >>> websafe("<'&\">")
         u'&lt;&#39;&amp;&quot;&gt;'
         >>> websafe(None)

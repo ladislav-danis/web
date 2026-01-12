@@ -1,45 +1,13 @@
 """
 Database API
 (part of web.py)
-
-This module provides a database interface for various database backends including
-PostgreSQL, MySQL, SQLite, and others. It offers a consistent API for database
-operations such as queries, inserts, updates, and deletes.
-
-The module supports different database drivers and provides utilities for
-parameter interpolation, SQL query building, and transaction management.
-
-Examples:
-    >>> # This is a conceptual example. A real database connection is needed.
-    >>> # import web.db
-    >>> # db = web.db.database(dbn='sqlite', db=':memory:')
-    >>> # db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
-    -1
-    >>> # db.insert('users', name='Alice')
-    1
-    >>> # list(db.select('users'))
-    [<storage {'id': 1, 'name': 'Alice'}>]
 """
 
 import ast
 import datetime
-import logging
 import os
 import re
 import time
-from types import ModuleType
-from typing import (
-    Any,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    Union,
-)
 from urllib.parse import unquote, urlparse
 
 from .py3helpers import iteritems
@@ -71,7 +39,7 @@ __all__ = [
     "DB",
 ]
 
-TOKEN = "[ \\f\\t]*(\\\\\\r?\\n[ \\f\\t]*)*(#[^\\r\\n]*)?(((\\d+[jJ]|((\\d+\\.\\d*|\\.\\d+)([eE][-+]?\\d+)?|\\d+[eE][-+]?\\d+)[jJ])|((\\d+\\.\\d*|\\.\\d+)([eE][-+]?\\d+)?|\\d+[eE][-+]?\\d+)|(0[xX][\\da-fA-F]+[lL]?|0[bB][01]+[lL]?|(0[oO][0-7]+)|(0[0-7]*)[lL]?|[1-9]\\d*[lL]?))|((\\*\\*=?|>>=?|<<=?|<>|!=|//=?|[+\\-*/%&|^=<>]=?|~)|[][(){}]|(\\r?\\n|[:;.,`@]))|([uUbB]?[rR]?'[^\\n'\\\\]*(?:\\\\.[^\\n'\\\\]*)*'|[uUbB]?[rR]?\"[^\\n\"\\\\]*(?:\\\\.[^\\n\"\\\\]*)*\")|[a-zA-Z_]\\w*)"
+TOKEN = "[ \\f\\t]*(\\\\\\r?\\n[ \\f\\t]*)*(#[^\\r\\n]*)?(((\\d+[jJ]|((\\d+\\.\\d*|\\.\\d+)([eE][-+]?\\d+)?|\\d+[eE][-+]?\\d+)[jJ])|((\\d+\\.\\d*|\\.\\d+)([eE][-+]?\\d+)?|\\d+[eE][-+]?\\d+)|(0[xX][\\da-fA-F]+[lL]?|0[bB][01]+[lL]?|(0[oO][0-7]+)|(0[0-7]*)[lL]?|[1-9]\\d*[lL]?))|((\\*\\*=?|>>=?|<<=?|<>|!=|//=?|[+\\-*/%&|^=<>]=?|~)|[][(){}]|(\\r?\\n|[:;.,`@]))|([uUbB]?[rR]?'[^\\n'\\\\]*(?:\\\\.[^\\n'\\\\]*)*'|[uUbB]?[rR]?\"[^\\n\"\\\\]*(?:\\\\.[^\\n\"\\\\]*)*\")|[a-zA-Z_]\\w*)"  # noqa: E501
 
 tokenprog = re.compile(TOKEN)
 
@@ -82,55 +50,39 @@ sqlite_drivers = ("sqlite3", "pysqlite2.dbapi2", "sqlite")
 
 
 class UnknownDB(Exception):
-    """Raised for unsupported database management systems."""
+    """raised for unsupported dbms"""
 
     pass
 
 
 class _ItplError(ValueError):
-    """Internal error for string interpolation failures."""
-
-    def __init__(self, text: str, pos: int) -> None:
-        """Initializes the interpolation error.
-
-        Args:
-            text: The text where the error occurred.
-            pos: The character position of the error.
-        """
-        super().__init__()
+    def __init__(self, text, pos):
+        ValueError.__init__(self)
         self.text = text
         self.pos = pos
 
-    def __str__(self) -> str:
-        """Returns a string representation of the error."""
-        return f"unfinished expression in {repr(self.text)} at char {self.pos}"
+    def __str__(self):
+        return "unfinished expression in %s at char %d" % (repr(self.text), self.pos)
 
 
 class TransactionError(Exception):
-    """Raised for errors during a database transaction."""
-
     pass
 
 
 class UnknownParamstyle(Exception):
-    """Raised for unsupported DB API paramstyles.
+    """
+    raised for unsupported db paramstyles
 
-    Currently supported styles are: qmark, numeric, format, pyformat.
+    (currently supported: qmark, numeric, format, pyformat)
     """
 
     pass
 
 
 class SQLParam:
-    """Represents a parameter in an SQLQuery.
+    """
+    Parameter in SQLQuery.
 
-    This class encapsulates a value that will be substituted into an SQL query,
-    handling various parameter styles required by different database drivers.
-
-    Args:
-        value: The value to be used as a parameter in the SQL query.
-
-    Examples:
         >>> q = SQLQuery(["SELECT * FROM test WHERE name=", SQLParam("joe")])
         >>> q
         <sql: "SELECT * FROM test WHERE name='joe'">
@@ -142,27 +94,10 @@ class SQLParam:
 
     __slots__ = ["value"]
 
-    def __init__(self, value: Any) -> None:
-        """Initializes the SQL parameter.
-
-        Args:
-            value: The parameter value.
-        """
+    def __init__(self, value):
         self.value = value
 
-    def get_marker(self, paramstyle: str = "pyformat") -> str:
-        """Gets the parameter marker for a given parameter style.
-
-        Args:
-            paramstyle: The parameter style to use. Supported styles are
-                'qmark', 'numeric', 'format', and 'pyformat'.
-
-        Returns:
-            The appropriate parameter marker string for the given style.
-
-        Raises:
-            UnknownParamstyle: If the provided paramstyle is not supported.
-        """
+    def get_marker(self, paramstyle="pyformat"):
         if paramstyle == "qmark":
             return "?"
         elif paramstyle == "numeric":
@@ -171,53 +106,44 @@ class SQLParam:
             return "%s"
         raise UnknownParamstyle(paramstyle)
 
-    def sqlquery(self) -> "SQLQuery":
-        """Converts this SQLParam to an SQLQuery.
-
-        Returns:
-            A new SQLQuery containing only this parameter.
-        """
+    def sqlquery(self):
         return SQLQuery([self])
 
-    def __add__(self, other: Any) -> "SQLQuery":
-        """Adds this parameter to another query component."""
+    def __add__(self, other):
         return self.sqlquery() + other
 
-    def __radd__(self, other: Any) -> "SQLQuery":
-        """Adds another query component to this parameter."""
+    def __radd__(self, other):
         return other + self.sqlquery()
 
-    def __str__(self) -> str:
-        """Returns the string representation of the parameter's value."""
+    def __str__(self):
         return str(self.value)
 
-    def __eq__(self, other: Any) -> bool:
-        """Checks for equality with another SQLParam."""
+    def __eq__(self, other):
         return isinstance(other, SQLParam) and other.value == self.value
 
-    def __repr__(self) -> str:
-        """Returns the formal representation of the SQLParam."""
-        return f"<param: {repr(self.value)}>"
+    def __repr__(self):
+        return "<param: %s>" % repr(self.value)
 
 
 sqlparam = SQLParam
 
 
 class SQLQuery:
-    """Represents an SQL query with parameters.
+    """
+    You can pass this sort of thing as a clause in any db function.
+    Otherwise, you can pass a dictionary to the keyword argument `vars`
+    and the function will call reparam for you.
 
-    This class allows for the programmatic construction of SQL queries by
-    combining strings and SQL parameters. It handles parameter interpolation
-    for different database drivers, preventing SQL injection vulnerabilities.
+    Internally, consists of `items`, which is a list of strings and
+    SQLParams, which get concatenated to produce the actual query.
+    """
 
-    Args:
-        items: The initial items for the query. Can be a list of strings
-            and parameters, a single parameter, another SQLQuery, or a string.
+    __slots__ = ["items"]
 
-    Attributes:
-        items (List[Union[str, SQLParam]]): The internal list of query components.
+    # tested in sqlquote's docstring
+    def __init__(self, items=None):
+        r"""Creates a new SQLQuery.
 
-    Examples:
         >>> SQLQuery("x")
         <sql: 'x'>
         >>> q = SQLQuery(['SELECT * FROM ', 'test', ' WHERE x=', SQLParam(1)])
@@ -227,20 +153,9 @@ class SQLQuery:
         ('SELECT * FROM test WHERE x=%s', [1])
         >>> SQLQuery(SQLParam(1))
         <sql: '1'>
-    """
-
-    __slots__ = ["items"]
-
-    def __init__(
-        self, items: Optional[Union[list, SQLParam, "SQLQuery", str]] = None
-    ) -> None:
-        """Initializes the SQLQuery.
-
-        Args:
-            items: The initial components of the query.
         """
         if items is None:
-            self.items: List[Union[str, SQLParam]] = []
+            self.items = []
         elif isinstance(items, list):
             self.items = items
         elif isinstance(items, SQLParam):
@@ -255,16 +170,10 @@ class SQLQuery:
             if isinstance(item, SQLParam) and isinstance(item.value, SQLLiteral):
                 self.items[i] = item.value.v
 
-    def append(self, value: Any) -> None:
-        """Appends a value to the query items.
-
-        Args:
-            value: The value to append to the query.
-        """
+    def append(self, value):
         self.items.append(value)
 
-    def __add__(self, other: Union[str, "SQLQuery"]) -> "SQLQuery":
-        """Concatenates this query with another component."""
+    def __add__(self, other):
         if isinstance(other, str):
             items = [other]
         elif isinstance(other, SQLQuery):
@@ -273,8 +182,7 @@ class SQLQuery:
             return NotImplemented
         return SQLQuery(self.items + items)
 
-    def __radd__(self, other: Union[str, "SQLQuery"]) -> "SQLQuery":
-        """Concatenates another component with this query."""
+    def __radd__(self, other):
         if isinstance(other, str):
             items = [other]
         elif isinstance(other, SQLQuery):
@@ -283,8 +191,7 @@ class SQLQuery:
             return NotImplemented
         return SQLQuery(items + self.items)
 
-    def __iadd__(self, other: Union[str, SQLParam, "SQLQuery"]) -> "SQLQuery":
-        """Appends another component to this query in-place."""
+    def __iadd__(self, other):
         if isinstance(other, (str, SQLParam)):
             self.items.append(other)
         elif isinstance(other, SQLQuery):
@@ -293,36 +200,15 @@ class SQLQuery:
             return NotImplemented
         return self
 
-    def __len__(self) -> int:
-        """Returns the length of the rendered query string.
-
-        Returns:
-            The length of the query string.
-        """
+    def __len__(self):
         return len(self.query())
 
-    def __eq__(self, other: Any) -> bool:
-        """Checks for equality with another SQLQuery.
-
-        Args:
-            other: Another object to compare with.
-
-        Returns:
-            True if both queries have the same items, False otherwise.
-        """
+    def __eq__(self, other):
         return isinstance(other, SQLQuery) and other.items == self.items
 
-    def query(self, paramstyle: Optional[str] = None) -> str:
-        """Returns the query string with parameter markers.
-
-        Args:
-            paramstyle: The parameter style to use ('qmark', 'numeric',
-                'format', 'pyformat'). Defaults to the driver's style.
-
-        Returns:
-            The SQL query string with parameters substituted by markers.
-
-        Examples:
+    def query(self, paramstyle=None):
+        """
+        Returns the query part of the sql query.
             >>> q = SQLQuery(["SELECT * FROM test WHERE name=", SQLParam('joe')])
             >>> q.query()
             'SELECT * FROM test WHERE name=%s'
@@ -337,50 +223,37 @@ class SQLQuery:
             else:
                 x = safestr(x)
                 # automatically escape % characters in the query
+                # For backward compatibility, ignore escaping when the query
+                # looks already escaped
                 if paramstyle in ["format", "pyformat"]:
                     if "%" in x and "%%" not in x:
                         x = x.replace("%", "%%")
                 s.append(x)
         return "".join(s)
 
-    def values(self) -> List[Any]:
-        """Returns the parameter values for the SQL query.
-
-        Returns:
-            A list of parameter values.
-
-        Examples:
+    def values(self):
+        """
+        Returns the values of the parameters used in the sql query.
             >>> q = SQLQuery(["SELECT * FROM test WHERE name=", SQLParam('joe')])
             >>> q.values()
             ['joe']
         """
         return [i.value for i in self.items if isinstance(i, SQLParam)]
 
-    @staticmethod
-    def join(
-        items: Iterable[Any],
-        sep: str = " ",
-        prefix: Optional[str] = None,
-        suffix: Optional[str] = None,
-        target: Optional["SQLQuery"] = None,
-    ) -> "SQLQuery":
-        """Joins multiple query components into a single SQLQuery.
+    def join(items, sep=" ", prefix=None, suffix=None, target=None):
+        """
+        Joins multiple queries.
 
-        Args:
-            items: A list of items to join.
-            sep: Separator to place between items. Defaults to " ".
-            prefix: A string to add before the joined items.
-            suffix: A string to add after the joined items.
-            target: An existing SQLQuery to append to. If None, a new one is created.
+        >>> SQLQuery.join(['a', 'b'], ', ')
+        <sql: 'a, b'>
 
-        Returns:
-            A new or modified SQLQuery with the joined items.
+        Optionally, prefix and suffix arguments can be provided.
 
-        Examples:
-            >>> SQLQuery.join(['a', 'b'], ', ')
-            <sql: 'a, b'>
-            >>> SQLQuery.join(['a', 'b'], ', ', prefix='(', suffix=')')
-            <sql: '(a, b)'>
+        >>> SQLQuery.join(['a', 'b'], ', ', prefix='(', suffix=')')
+        <sql: '(a, b)'>
+
+        If target argument is provided, the items are appended to target
+        instead of creating a new SQLQuery.
         """
         if target is None:
             target = SQLQuery()
@@ -404,91 +277,62 @@ class SQLQuery:
             target_items.append(suffix)
         return target
 
-    def _str(self) -> str:
-        """Internal helper to render the full query string with values."""
+    join = staticmethod(join)
+
+    def _str(self):
         try:
             return self.query() % tuple(sqlify(x) for x in self.values())
         except (ValueError, TypeError):
             return self.query()
 
-    def __str__(self) -> str:
-        """Returns the query with values interpolated (for debugging)."""
+    def __str__(self):
         return safestr(self._str())
 
-    def __unicode__(self) -> str:
-        """Returns the unicode query with values interpolated."""
+    def __unicode__(self):
         return safeunicode(self._str())
 
-    def __repr__(self) -> str:
-        """Returns the formal representation of the SQLQuery."""
-        return f"<sql: {repr(str(self))}>"
+    def __repr__(self):
+        return "<sql: %s>" % repr(str(self))
 
 
 class SQLLiteral:
-    """Protects a string from being quoted by `sqlquote`.
+    """
+    Protects a string from `sqlquote`.
 
-    This class is used to wrap strings that should be treated as literal SQL,
-    such as function calls (`NOW()`) or other expressions, preventing them
-    from being escaped or quoted as string values.
-
-    Args:
-        v: The literal SQL string to protect.
-
-    Examples:
         >>> sqlquote('NOW()')
         <sql: "'NOW()'">
         >>> sqlquote(SQLLiteral('NOW()'))
         <sql: 'NOW()'>
     """
 
-    def __init__(self, v: str) -> None:
-        """Initializes the SQL literal.
-
-        Args:
-            v: The literal SQL string.
-        """
+    def __init__(self, v):
         self.v = v
 
-    def __repr__(self) -> str:
-        """Returns the formal representation of the SQLLiteral."""
-        return f"<literal: {repr(self.v)}>"
+    def __repr__(self):
+        return "<literal: %r>" % self.v
 
 
 sqlliteral = SQLLiteral
 
 
-def _sqllist(values: Union[List[Any], Set[Any], Tuple[Any, ...]]) -> SQLQuery:
-    """Converts a Python collection into an SQL list expression.
-
-    This function takes a list, set, or tuple and converts it into a SQL
-    expression like `(val1, val2, ...)`.
-
-    Args:
-        values: A list, set, or tuple of values to convert.
-
-    Returns:
-        An SQLQuery object representing the SQL list expression.
-
-    Examples:
-        >>> _sqllist([1, 2, 3])
-        <sql: '(1, 2, 3)'>
-        >>> _sqllist({1, 2, 3, 5})
-        <sql: '(1, 2, 3, 5)'>
-        >>> _sqllist((5, 1, 3, 2, 2, 5))
-        <sql: '(1, 2, 3, 5)'>
+def _sqllist(values):
     """
-    items: List[Any] = ["("]
-    processed_values: List[Any]
+    >>> _sqllist([1, 2, 3])
+    <sql: '(1, 2, 3)'>
+    >>> _sqllist(set([5, 1, 3, 2]))
+    <sql: '(1, 2, 3, 5)'>
+    >>> _sqllist((5, 1, 3, 2, 2, 5))
+    <sql: '(1, 2, 3, 5)'>
+    """
+    items = []
+    items.append("(")
 
     if isinstance(values, set):
-        processed_values = sorted(list(values))
+        values = list(values)
     elif isinstance(values, tuple):
-        # Using dict.fromkeys to preserve order and remove duplicates
-        processed_values = list(dict.fromkeys(values))
-    else:
-        processed_values = values
+        values = list(set(values))
 
-    for i, v in enumerate(processed_values):
+    for i, v in enumerate(values):
         if i != 0:
             items.append(", ")
         items.append(sqlparam(v))
@@ -496,21 +340,11 @@ def _sqllist(values: Union[List[Any], Set[Any], Tuple[Any, ...]]) -> SQLQuery:
     return SQLQuery(items)
 
 
-def reparam(string_: str, dictionary: Dict[str, Any]) -> SQLQuery:
-    """Interpolates a string with a dictionary, returning an `SQLQuery`.
+def reparam(string_, dictionary):
+    """
+    Takes a string and a dictionary and interpolates the string
+    using values from the dictionary. Returns an `SQLQuery` for the result.
 
-    This function safely substitutes variables in an SQL-like string (e.g., `$name`)
-    with values from a dictionary. It handles various data types, converting
-    collections to SQL list expressions.
-
-    Args:
-        string_: The string template with variables to interpolate.
-        dictionary: A dictionary mapping variable names to their values.
-
-    Returns:
-        An SQLQuery object with interpolated values.
-
-    Examples:
         >>> reparam("s = $s", dict(s=True))
         <sql: "s = 't'">
         >>> reparam("s IN $s", dict(s=[1, 2]))
@@ -519,19 +353,10 @@ def reparam(string_: str, dictionary: Dict[str, Any]) -> SQLQuery:
     return SafeEval().safeeval(string_, dictionary)
 
 
-def sqlify(obj: Any) -> str:
-    """Converts a Python object to its proper SQL string representation.
+def sqlify(obj):
+    """
+    converts `obj` to its proper SQL version
 
-    This function is primarily for debugging and rendering queries, converting
-    Python types like `None` and `bool` to their SQL equivalents (`NULL`, `'f'`).
-
-    Args:
-        obj: The Python object to convert.
-
-    Returns:
-        The SQL string representation of the object.
-
-    Examples:
         >>> sqlify(None)
         'NULL'
         >>> sqlify(True)
@@ -539,6 +364,9 @@ def sqlify(obj: Any) -> str:
         >>> sqlify(3)
         '3'
     """
+    # because `1 == True and hash(1) == hash(True)`
+    # we have to do this the hard way...
+
     if obj is None:
         return "NULL"
     elif obj is True:
@@ -553,19 +381,10 @@ def sqlify(obj: Any) -> str:
         return repr(obj)
 
 
-def sqllist(lst: Union[str, List[str]]) -> str:
-    """Converts a list into a comma-separated SQL list string.
+def sqllist(lst):
+    """
+    Converts the arguments for use in something like a WHERE clause.
 
-    This is a simple utility for creating comma-separated lists for clauses
-    like `FROM table1, table2`. For value lists, use `sqlquote`.
-
-    Args:
-        lst: A list of items or a single string.
-
-    Returns:
-        A comma-separated string representation.
-
-    Examples:
         >>> sqllist(['a', 'b'])
         'a, b'
         >>> sqllist('a')
@@ -577,19 +396,13 @@ def sqllist(lst: Union[str, List[str]]) -> str:
         return ", ".join(lst)
 
 
-def sqlors(left: str, lst: Any) -> SQLQuery:
-    """Creates an SQL OR clause from a left-hand side and a list of values.
+def sqlors(left, lst):
+    """
+    `left is a SQL clause like `tablename.arg = `
+    and `lst` is a list of values. Returns a reparam-style
+    pair featuring the SQL that ORs together the clause
+    for each item in the lst.
 
-    Generates an expression like `(left val1 OR left val2 OR ...)`.
-
-    Args:
-        left: The left-hand side of the clause (e.g., 'tablename.col = ').
-        lst: A list of values or a single value to be OR'd.
-
-    Returns:
-        An SQLQuery object representing the OR expression.
-
-    Examples:
         >>> sqlors('foo = ', [])
         <sql: '1=2'>
         >>> sqlors('foo = ', [1])
@@ -612,20 +425,14 @@ def sqlors(left: str, lst: Any) -> SQLQuery:
             ["("] + sum(([left, sqlparam(x), " OR "] for x in lst), []) + ["1=2)"]
         )
     else:
-        return SQLQuery([left, sqlparam(lst)])
+        return left + sqlparam(lst)
 
 
-def sqlwhere(data: Iterable[Tuple[str, Any]], grouping: str = " AND ") -> SQLQuery:
-    """Converts an iterable of (key, value) pairs to an SQL WHERE clause.
+def sqlwhere(data, grouping=" AND "):
+    """
+    Converts a two-tuple (key, value) iterable `data` to an SQL WHERE clause
+    `SQLQuery`.
 
-    Args:
-        data: An iterable of (key, value) tuples representing conditions.
-        grouping: The operator to join conditions (default: " AND ").
-
-    Returns:
-        An SQLQuery object representing the WHERE clause.
-
-    Examples:
         >>> sqlwhere((('cust_id', 2), ('order_id',3)))
         <sql: 'cust_id = 2 AND order_id = 3'>
         >>> sqlwhere((('order_id', 3), ('cust_id', 2)), grouping=', ')
@@ -633,28 +440,22 @@ def sqlwhere(data: Iterable[Tuple[str, Any]], grouping: str = " AND ") -> SQLQue
         >>> sqlwhere((('a', 'a'), ('b', 'b'))).query()
         'a = %s AND b = %s'
     """
+
     return SQLQuery.join([k + " = " + sqlparam(v) for k, v in data], grouping)
 
 
-def sqlquote(a: Any) -> SQLQuery:
-    """Ensures a value is properly quoted for use in an SQL query.
+def sqlquote(a):
+    """
+    Ensures `a` is quoted properly for use in a SQL query.
 
-    This function safely handles various data types, including lists, tuples,
-    and sets, converting them into properly parameterized SQL constructs.
-
-    Args:
-        a: The value to be quoted (can be a single value or a collection).
-
-    Returns:
-        An SQLQuery object with the properly quoted value(s).
-
-    Examples:
-        >>> 'WHERE x = ' + sqlquote(True)
-        <sql: "WHERE x = 't'">
-        >>> 'WHERE y IN ' + sqlquote([2, 3])
-        <sql: 'WHERE y IN (2, 3)'>
-        >>> 'WHERE z IN ' + sqlquote({2, 3, 4})
-        <sql: 'WHERE z IN (2, 3, 4)'>
+        >>> 'WHERE x = ' + sqlquote(True) + ' AND y = ' + sqlquote(3)
+        <sql: "WHERE x = 't' AND y = 3">
+        >>> 'WHERE x = ' + sqlquote(True) + ' AND y IN ' + sqlquote([2, 3])
+        <sql: "WHERE x = 't' AND y IN (2, 3)">
+        >>> 'WHERE x = ' + sqlquote(True) + ' AND y IN ' + sqlquote(set([3, 2, 3, 4]))
+        <sql: "WHERE x = 't' AND y IN (2, 3, 4)">
+        >>> 'WHERE x = ' + sqlquote(True) + ' AND y IN ' + sqlquote((3, 2, 3, 4))
+        <sql: "WHERE x = 't' AND y IN (2, 3, 4)">
     """
     if isinstance(a, (list, tuple, set)):
         return _sqllist(a)
@@ -663,225 +464,140 @@ def sqlquote(a: Any) -> SQLQuery:
 
 
 class BaseResultSet:
-    """Base implementation for the result of a database query.
+    """Base implementation of Result Set, the result of a db query."""
 
-    This class provides the core functionality for iterating over query results
-    and accessing individual rows. It manages the database cursor.
-
-    Args:
-        cursor: The database cursor object used to fetch results.
-
-    Attributes:
-        cursor: The database cursor.
-        names: A list of column names from the query result.
-    """
-
-    def __init__(self, cursor: Any) -> None:
-        """Initializes the result set.
-
-        Args:
-            cursor: The database cursor from the executed query.
-        """
+    def __init__(self, cursor):
         self.cursor = cursor
         self.names = [x[0] for x in cursor.description]
         self._index = 0
 
-    def list(self) -> List[storage]:
-        """Returns all rows from the result set as a list.
-
-        Returns:
-            A list of `storage` objects, each representing a row.
-        """
+    def list(self):
         rows = [self._prepare_row(d) for d in self.cursor.fetchall()]
         self._index += len(rows)
         return rows
 
-    def _prepare_row(self, row: tuple) -> storage:
-        """Converts a single row tuple into a `storage` object.
-
-        Args:
-            row: A tuple representing a single row from the database.
-
-        Returns:
-            A `storage` object with column names as keys.
-        """
+    def _prepare_row(self, row):
         return storage(dict(zip(self.names, row)))
 
-    def __iter__(self) -> "BaseResultSet":
-        """Makes the result set iterable.
-
-        Returns:
-            Itself as the iterator.
-        """
+    def __iter__(self):
         return self
 
-    def __next__(self) -> storage:
-        """Returns the next row from the result set.
-
-        Returns:
-            The next row as a `storage` object.
-
-        Raises:
-            StopIteration: When there are no more rows.
-        """
+    def __next__(self):
         row = self.cursor.fetchone()
         if row is None:
             raise StopIteration()
         self._index += 1
         return self._prepare_row(row)
 
-    next = __next__  # Python 2.7 compatibility
+    next = __next__  # for python 2.7 support
 
-    def first(self, default: Any = None) -> Any:
-        """Returns the first row or a default value if the result is empty.
+    def first(self, default=None):
+        """Returns the first row of this ResultSet or None when there are no
+        elements.
 
-        Args:
-            default: The value to return if the result set is empty.
-
-        Returns:
-            The first row as a `storage` object, or the default value.
+        If the optional argument default is specified, that is returned instead
+        of None when there are no elements.
         """
         try:
             return next(iter(self))
         except StopIteration:
             return default
 
-    def __getitem__(self, i: int) -> storage:
-        """Gets a specific row by index.
-
-        Args:
-            i: The index of the row to retrieve.
-
-        Returns:
-            The row at the specified index as a `storage` object.
-
-        Raises:
-            IndexError: If the index is out of range or has already been passed.
-        """
+    def __getitem__(self, i):
+        # todo: slices
         if i < self._index:
-            raise IndexError(f"already passed {i}")
+            raise IndexError("already passed " + str(i))
         try:
             while i > self._index:
                 next(self)
+                self._index += 1
             # now self._index == i
+            self._index += 1
             return next(self)
         except StopIteration:
             raise IndexError(str(i))
 
 
 class ResultSet(BaseResultSet):
-    """The result of a database query, supporting `len()`."""
+    """The result of a database query."""
 
-    def __len__(self) -> int:
-        """Returns the number of rows in the result set.
-
-        Note: This may not be supported by all database drivers.
-
-        Returns:
-            The number of rows in the result set.
-        """
+    def __len__(self):
         return int(self.cursor.rowcount)
 
 
 class SqliteResultSet(BaseResultSet):
-    """Result Set for SQLite.
+    """Result Set for sqlite.
 
-    This is the same as ResultSet but does not support `len()`.
+    Same functionally as ResultSet except len is not supported.
     """
 
-    def __init__(self, cursor: Any) -> None:
-        """Initializes the SQLite result set.
+    def __init__(self, cursor):
+        BaseResultSet.__init__(self, cursor)
+        self._head = None
 
-        Args:
-            cursor: The SQLite database cursor.
-        """
-        super().__init__(cursor)
-        self._head: Optional[storage] = None
-
-    def __next__(self) -> storage:
-        """Returns the next row from the result set.
-
-        Returns:
-            The next row as a `storage` object.
-
-        Raises:
-            StopIteration: When there are no more rows.
-        """
+    def __next__(self):
         if self._head is not None:
-            row = self._head
-            self._head = None
-            return row
+            self._index += 1
+            return self._head
         else:
             return super().__next__()
 
-    def __bool__(self) -> bool:
-        """Checks if the result set contains any rows.
-
-        Returns:
-            True if there are rows, False otherwise.
-        """
+    def __bool__(self):
+        # The ResultSet class class doesn't need to support __bool__ explicitly
+        # because it has __len__. Since SqliteResultSet doesn't support len,
+        # we need to peep into the result to find if the result is empty of not.
         if self._head is None:
             try:
-                self._head = super().__next__()
+                self._head = next(self)
+                self._index -= 1  # reset the index
             except StopIteration:
                 return False
         return True
 
 
 class Transaction:
-    """Manages a database transaction.
+    """Database transaction."""
 
-    This class supports both top-level and nested transactions (using savepoints)
-    and is designed to be used with a `with` statement.
-
-    Args:
-        ctx: The thread-local context containing database connection info.
-    """
-
-    def __init__(self, ctx: threadeddict) -> None:
-        """Initializes a new transaction.
-
-        Args:
-            ctx: The database context.
-        """
+    def __init__(self, ctx):
         self.ctx = ctx
-        self.transaction_count = len(ctx.transactions)
+        self.transaction_count = transaction_count = len(ctx.transactions)
 
         class transaction_engine:
-            def do_transact(self) -> None:
+            """Transaction Engine used in top level transactions."""
+
+            def do_transact(self):
                 ctx.commit(unload=False)
 
-            def do_commit(self) -> None:
+            def do_commit(self):
                 ctx.commit()
 
-            def do_rollback(self) -> None:
+            def do_rollback(self):
                 ctx.rollback()
 
         class subtransaction_engine:
-            def query(self, q: str) -> None:
-                db_cursor = ctx.db.cursor()
-                ctx.db_execute(db_cursor, SQLQuery(q % self.transaction_count))
+            """Transaction Engine used in sub transactions."""
 
-            def do_transact(self) -> None:
+            def query(self, q):
+                db_cursor = ctx.db.cursor()
+                ctx.db_execute(db_cursor, SQLQuery(q % transaction_count))
+
+            def do_transact(self):
                 self.query("SAVEPOINT webpy_sp_%s")
 
-            def do_commit(self) -> None:
+            def do_commit(self):
                 self.query("RELEASE SAVEPOINT webpy_sp_%s")
 
-            def do_rollback(self) -> None:
+            def do_rollback(self):
                 self.query("ROLLBACK TO SAVEPOINT webpy_sp_%s")
 
         class dummy_engine:
-            def do_transact(self) -> None:
-                pass
+            """Transaction Engine used instead of subtransaction_engine
+            when sub transactions are not supported."""
 
-            def do_commit(self) -> None:
-                pass
-
-            def do_rollback(self) -> None:
-                pass
+            do_transact = do_commit = do_rollback = lambda self: None
 
         if self.transaction_count:
+            # nested transactions are not supported in some databases
             if self.ctx.get("ignore_nested_transactions"):
                 self.engine = dummy_engine()
             else:
@@ -892,95 +608,64 @@ class Transaction:
         self.engine.do_transact()
         self.ctx.transactions.append(self)
 
-    def __enter__(self) -> "Transaction":
-        """Enters the runtime context for the transaction.
-
-        Returns:
-            The transaction object itself.
-        """
+    def __enter__(self):
         return self
 
-    def __exit__(self, exctype: Any, excvalue: Any, traceback: Any) -> None:
-        """Exits the runtime context, committing or rolling back.
-
-        Args:
-            exctype: The exception type if an exception occurred.
-            excvalue: The exception value if an exception occurred.
-            traceback: The traceback object if an exception occurred.
-        """
+    def __exit__(self, exctype, excvalue, traceback):
         if exctype is not None:
             self.rollback()
         else:
             self.commit()
 
-    def commit(self) -> None:
-        """Commits the current transaction or savepoint."""
+    def commit(self):
         if len(self.ctx.transactions) > self.transaction_count:
             self.engine.do_commit()
             self.ctx.transactions = self.ctx.transactions[: self.transaction_count]
 
-    def rollback(self) -> None:
-        """Rolls back the current transaction or savepoint."""
+    def rollback(self):
         if len(self.ctx.transactions) > self.transaction_count:
             self.engine.do_rollback()
             self.ctx.transactions = self.ctx.transactions[: self.transaction_count]
 
 
 class DB:
-    """A consistent database interface for web.py applications.
+    """Database"""
 
-    This class provides a high-level API for database operations across
-    different backends, handling connections, queries, and transactions.
-
-    Args:
-        db_module: The imported database driver module (e.g., psycopg2).
-        keywords: A dictionary of database connection parameters.
-
-    Attributes:
-        db_module: The database driver module in use.
-        keywords (Dict[str, Any]): The connection parameters.
-        printing (bool): If True, SQL queries are printed for debugging.
-        supports_multiple_insert (bool): If True, the backend supports multi-row inserts.
-        has_pooling (bool): If True, connection pooling is enabled.
-    """
-
-    def __init__(self, db_module: ModuleType, keywords: Dict[str, Any]) -> None:
-        """Initializes the database interface.
-
-        Args:
-            db_module: The database driver module.
-            keywords: Connection parameters (host, user, password, etc.).
-        """
+    def __init__(self, db_module, keywords):
+        """Creates a database."""
+        # some DB implementations take optional parameter `driver` to use a
+        # specific driver module but it should not be passed to `connect`.
         keywords.pop("driver", None)
 
         self.db_module = db_module
         self.keywords = keywords
-        self.paramstyle: str = "pyformat"
 
         self._ctx = threadeddict()
+        # flag to enable/disable printing queries
         self.printing = config.get("debug_sql", config.get("debug", False))
         self.supports_multiple_insert = False
 
         try:
             import dbutils  # noqa: F401
 
+            # enable pooling if DBUtils module is available.
             self.has_pooling = True
         except ImportError:
             self.has_pooling = False
 
+        # Pooling can be disabled by passing pooling=False in the keywords.
         self.has_pooling = self.keywords.pop("pooling", True) and self.has_pooling
 
-    @property
-    def ctx(self) -> threadeddict:
-        """Provides a thread-local context for the database connection."""
+    def _getctx(self):
         if not self._ctx.get("db"):
             self._load_context(self._ctx)
         return self._ctx
 
-    def _load_context(self, ctx: threadeddict) -> None:
-        """Loads the database connection into the context."""
+    ctx = property(_getctx)
+
+    def _load_context(self, ctx):
         ctx.dbq_count = 0
-        ctx.transactions = []
+        ctx.transactions = []  # stack of transactions
 
         if self.has_pooling:
             ctx.db = self._connect_with_pooling(self.keywords)
@@ -990,15 +675,18 @@ class DB:
 
         if not hasattr(ctx.db, "commit"):
             ctx.db.commit = lambda: None
+
         if not hasattr(ctx.db, "rollback"):
             ctx.db.rollback = lambda: None
 
-        def commit(unload: bool = True) -> None:
+        def commit(unload=True):
+            # do db commit and release the connection if pooling is enabled.
             ctx.db.commit()
             if unload and self.has_pooling:
                 self._unload_context(self._ctx)
 
-        def rollback() -> None:
+        def rollback():
+            # do db rollback and release the connection if pooling is enabled.
             ctx.db.rollback()
             if self.has_pooling:
                 self._unload_context(self._ctx)
@@ -1006,39 +694,58 @@ class DB:
         ctx.commit = commit
         ctx.rollback = rollback
 
-    def _unload_context(self, ctx: threadeddict) -> None:
-        """Unloads the database connection from the context."""
-        if hasattr(ctx, "db"):
-            del ctx.db
+    def _unload_context(self, ctx):
+        del ctx.db
 
-    def _connect(self, keywords: Dict[str, Any]) -> Any:
-        """Establishes a direct database connection."""
+    def _connect(self, keywords):
         return self.db_module.connect(**keywords)
 
-    def _connect_with_pooling(self, keywords: Dict[str, Any]) -> Any:
-        """Establishes a pooled database connection."""
-        from dbutils import pooled_db as PooledDB
+    def _connect_with_pooling(self, keywords):
+        def get_pooled_db():
+            # In DBUtils 2.0.0, names were made pep8 compliant
+            # https://webwareforpython.github.io/DBUtils/changelog.html
+            from dbutils import pooled_db as PooledDB
 
-        if not hasattr(self, "_pooleddb"):
-            self._pooleddb = PooledDB.PooledDB(creator=self.db_module, **keywords)
+            # In DBUtils 0.9.3, `dbapi` argument is renamed as `creator`
+            # see Bug#122112
+
+            if PooledDB.__version__.split(".") < "0.9.3".split("."):
+                return PooledDB.PooledDB(dbapi=self.db_module, **keywords)
+            else:
+                return PooledDB.PooledDB(creator=self.db_module, **keywords)
+
+        if getattr(self, "_pooleddb", None) is None:
+            self._pooleddb = get_pooled_db()
+
         return self._pooleddb.connection()
 
-    def _db_cursor(self) -> Any:
-        """Returns a new cursor from the current connection."""
+    def _db_cursor(self):
         return self.ctx.db.cursor()
 
-    def _db_execute(self, cur: Any, sql_query: SQLQuery) -> Any:
-        """Executes an SQL query using the provided cursor."""
+    def _param_marker(self):
+        """Returns parameter marker based on paramstyle attribute if this database."""
+        style = getattr(self, "paramstyle", "pyformat")
+
+        if style == "qmark":
+            return "?"
+        elif style == "numeric":
+            return ":1"
+        elif style in ["format", "pyformat"]:
+            return "%s"
+        raise UnknownParamstyle(style)
+
+    def _db_execute(self, cur, sql_query):
+        """executes an sql query"""
         self.ctx.dbq_count += 1
+
         try:
             a = time.time()
             query, params = self._process_query(sql_query)
             out = cur.execute(query, params)
             b = time.time()
-        except Exception:
-            logging.error("SQL Execution Error", exc_info=True)
+        except:
             if self.printing:
-                print(f"ERR: {str(sql_query)}", file=debug)
+                print("ERR:", str(sql_query), file=debug)
             if self.ctx.transactions:
                 self.ctx.transactions[-1].rollback()
             else:
@@ -1046,77 +753,71 @@ class DB:
             raise
 
         if self.printing:
-            duration = round(b - a, 2)
-            print(f"{duration} ({self.ctx.dbq_count}): {str(sql_query)}", file=debug)
+            print(
+                f"{round(b - a, 2)} ({self.ctx.dbq_count}): {str(sql_query)}",
+                file=debug,
+            )
         return out
 
-    def _process_query(self, sql_query: SQLQuery) -> Tuple[str, List[Any]]:
-        """Processes an SQLQuery into a query string and parameter list."""
+    def _process_query(self, sql_query):
+        """Takes the SQLQuery object and returns query string and parameters."""
         paramstyle = getattr(self, "paramstyle", "pyformat")
         query = sql_query.query(paramstyle)
         params = sql_query.values()
         return query, params
 
-    def _where(
-        self, where: Any, vars: Dict[str, Any]
-    ) -> Union[SQLQuery, str]:
-        """Constructs a WHERE clause from various input types."""
+    def _where(self, where, vars):
         if isinstance(where, int):
-            return SQLQuery(["id = ", sqlparam(where)])
+            where = "id = " + sqlparam(where)
+        # @@@ for backward-compatibility
+        elif isinstance(where, (list, tuple)) and len(where) == 2:
+            where = SQLQuery(where[0], where[1])
         elif isinstance(where, dict):
-            return self._where_dict(where)
+            where = self._where_dict(where)
         elif isinstance(where, SQLQuery):
-            return where
+            pass
         else:
-            return reparam(where, vars)
+            where = reparam(where, vars)
+        return where
 
-    def _where_dict(self, where: Dict[str, Any]) -> Optional[SQLQuery]:
-        """Converts a dictionary to a WHERE clause."""
-        clauses = [k + " = " + sqlquote(v) for k, v in sorted(where.items())]
-        return SQLQuery.join(clauses, " AND ") if clauses else None
+    def _where_dict(self, where):
+        where_clauses = []
 
-    def query(
-        self,
-        sql_query: Union[str, SQLQuery],
-        vars: Optional[Dict[str, Any]] = None,
-        processed: bool = False,
-        _test: bool = False,
-    ) -> Union[ResultSet, int, SQLQuery]:
-        """Executes an SQL query.
+        for k, v in sorted(iteritems(where), key=lambda t: t[0]):
+            where_clauses.append(k + " = " + sqlquote(v))
+        if where_clauses:
+            return SQLQuery.join(where_clauses, " AND ")
+        else:
+            return None
 
-        Args:
-            sql_query: The SQL query string or SQLQuery object.
-            vars: A dictionary of variables to interpolate into the query.
-            processed: If True, `sql_query` is assumed to be fully processed.
-            _test: If True, returns the generated SQLQuery without execution.
+    def query(self, sql_query, vars=None, processed=False, _test=False):
+        """
+        Execute SQL query `sql_query` using dictionary `vars` to interpolate it.
+        If `processed=True`, `vars` is a `reparam`-style list to use
+        instead of interpolating.
 
-        Returns:
-            A ResultSet for SELECT queries, row count for other queries, or
-            the SQLQuery object if _test is True.
-
-        Examples:
             >>> db = DB(None, {})
             >>> db.query("SELECT * FROM foo", _test=True)
             <sql: 'SELECT * FROM foo'>
             >>> db.query("SELECT * FROM foo WHERE x = $x", vars=dict(x='f'), _test=True)
+            <sql: "SELECT * FROM foo WHERE x = 'f'">
+            >>> db.query("SELECT * FROM foo WHERE x = " + sqlquote('f'), _test=True)
             <sql: "SELECT * FROM foo WHERE x = 'f'">
         """
         if vars is None:
             vars = {}
 
         if not processed and not isinstance(sql_query, SQLQuery):
-            sql_query_obj = reparam(sql_query, vars)
-        else:
-            sql_query_obj = SQLQuery(sql_query)
+            sql_query = reparam(sql_query, vars)
 
         if _test:
-            return sql_query_obj
+            return sql_query
 
         db_cursor = self._db_cursor()
-        self._db_execute(db_cursor, sql_query_obj)
+        self._db_execute(db_cursor, sql_query)
 
         if db_cursor.description:
-            out: Union[ResultSet, int] = self.create_result_set(db_cursor)
+            out = self.create_result_set(db_cursor)
         else:
             out = db_cursor.rowcount
 
@@ -1124,44 +825,33 @@ class DB:
             self.ctx.commit()
         return out
 
-    def create_result_set(self, cursor: Any) -> ResultSet:
-        """Creates a ResultSet from a cursor."""
+    def create_result_set(self, cursor):
         return ResultSet(cursor)
 
     def select(
         self,
-        tables: Union[str, List[str]],
-        vars: Optional[Dict[str, Any]] = None,
-        what: str = "*",
-        where: Any = None,
-        order: Optional[str] = None,
-        group: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        _test: bool = False,
-    ) -> Union[ResultSet, int, SQLQuery]:
-        """Builds and executes a SELECT query.
+        tables,
+        vars=None,
+        what="*",
+        where=None,
+        order=None,
+        group=None,
+        limit=None,
+        offset=None,
+        _test=False,
+    ):
+        """
+        Selects `what` from `tables` with clauses `where`, `order`,
+        `group`, `limit`, and `offset`. Uses vars to interpolate.
+        Otherwise, each clause can be a SQLQuery.
 
-        Args:
-            tables: The table(s) to select from.
-            vars: Dictionary of variables for interpolation.
-            what: The columns to select (e.g., 'id, name').
-            where: The WHERE clause.
-            order: The ORDER BY clause.
-            group: The GROUP BY clause.
-            limit: The LIMIT clause.
-            offset: The OFFSET clause.
-            _test: If True, returns the generated SQLQuery without execution.
-
-        Returns:
-            A ResultSet, or the SQLQuery object if _test is True.
-
-        Examples:
             >>> db = DB(None, {})
             >>> db.select('foo', _test=True)
             <sql: 'SELECT * FROM foo'>
             >>> db.select(['foo', 'bar'], where="foo.bar_id = bar.id", limit=5, _test=True)
             <sql: 'SELECT * FROM foo, bar WHERE foo.bar_id = bar.id LIMIT 5'>
+            >>> db.select('foo', where={'id': 5}, _test=True)
+            <sql: 'SELECT * FROM foo WHERE id = 5'>
         """
         if vars is None:
             vars = {}
@@ -1176,118 +866,110 @@ class DB:
 
         if _test:
             return qout
+
         return self.query(qout, processed=True)
 
     def where(
         self,
-        table: str,
-        what: str = "*",
-        order: Optional[str] = None,
-        group: Optional[str] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
-        _test: bool = False,
-        **kwargs: Any,
-    ) -> Union[ResultSet, int, SQLQuery]:
-        """Selects from a table using key-value pairs for the WHERE clause.
+        table,
+        what="*",
+        order=None,
+        group=None,
+        limit=None,
+        offset=None,
+        _test=False,
+        **kwargs,
+    ):
+        """
+        Selects from `table` where keys are equal to values in `kwargs`.
 
-        Args:
-            table: The table to select from.
-            what: The columns to select.
-            order: The ORDER BY clause.
-            group: The GROUP BY clause.
-            limit: The LIMIT clause.
-            offset: The OFFSET clause.
-            _test: If True, returns the generated SQLQuery without execution.
-            **kwargs: Key-value pairs for the WHERE clause (e.g., id=5).
-
-        Returns:
-            A ResultSet, or the SQLQuery object if _test is True.
-
-        Examples:
             >>> db = DB(None, {})
             >>> db.where('foo', bar_id=3, _test=True)
             <sql: 'SELECT * FROM foo WHERE bar_id = 3'>
+            >>> db.where('foo', source=2, crust='dewey', _test=True)
+            <sql: "SELECT * FROM foo WHERE crust = 'dewey' AND source = 2">
+            >>> db.where('foo', _test=True)
+            <sql: 'SELECT * FROM foo'>
         """
         where = self._where_dict(kwargs)
         return self.select(
             table,
             what=what,
-            where=where,
             order=order,
             group=group,
             limit=limit,
             offset=offset,
             _test=_test,
+            where=where,
         )
 
-    def sql_clauses(
-        self,
-        what: str,
-        tables: Union[str, List[str]],
-        where: Any,
-        group: Optional[str],
-        order: Optional[str],
-        limit: Optional[int],
-        offset: Optional[int],
-    ) -> List[Tuple[str, Any]]:
-        """Generates a list of SQL clauses for a SELECT statement."""
-        return [
+    def sql_clauses(self, what, tables, where, group, order, limit, offset):
+        return (
             ("SELECT", what),
             ("FROM", sqllist(tables)),
             ("WHERE", where),
             ("GROUP BY", group),
             ("ORDER BY", order),
+            # The limit and offset could be the values provided by
+            # the end-user and are potentially unsafe.
+            # Using them as parameters to avoid any risk.
             ("LIMIT", limit and SQLParam(limit).sqlquery()),
             ("OFFSET", offset and SQLParam(offset).sqlquery()),
-        ]
+        )
 
-    def gen_clause(self, sql: str, val: Any, vars: Dict[str, Any]) -> SQLQuery:
-        """Generates a single SQL clause."""
-        nout: Union[SQLQuery, str]
-        if sql == "WHERE" and isinstance(val, int):
-            nout = SQLQuery(["id = ", sqlquote(val)])
+    def gen_clause(self, sql, val, vars):
+        if isinstance(val, int):
+            if sql == "WHERE":
+                nout = "id = " + sqlquote(val)
+            else:
+                nout = SQLQuery(val)
+        # @@@
+        elif isinstance(val, (list, tuple)) and len(val) == 2:
+            nout = SQLQuery(val[0], val[1])  # backwards-compatibility
         elif sql == "WHERE" and isinstance(val, dict):
             nout = self._where_dict(val)
         elif isinstance(val, SQLQuery):
             nout = val
         else:
-            nout = reparam(str(val), vars)
+            nout = reparam(val, vars)
 
-        return SQLQuery(f"{sql} {nout}") if sql and nout else SQLQuery(nout)
+        def xjoin(a, b):
+            if a and b:
+                return a + " " + b
+            else:
+                return a or b
 
-    def insert(
-        self,
-        tablename: str,
-        seqname: Union[str, bool, None] = None,
-        _test: bool = False,
-        **values: Any,
-    ) -> Union[int, None, SQLQuery]:
-        """Inserts a new row into a table.
+        return xjoin(sql, nout)
 
-        Args:
-            tablename: The name of the table.
-            seqname: The name of the sequence for the primary key, or False if none.
-            _test: If True, returns the generated SQLQuery without execution.
-            **values: Key-value pairs for the columns to insert.
+    def insert(self, tablename, seqname=None, _test=False, **values):
+        """
+        Inserts `values` into `tablename`. Returns current sequence ID.
+        Set `seqname` to the ID if it's not the default, or to `False`
+        if there isn't one.
 
-        Returns:
-            The ID of the newly inserted row, None, or the SQLQuery if _test is True.
-
-        Examples:
             >>> db = DB(None, {})
             >>> q = db.insert('foo', name='bob', age=2, created=SQLLiteral('NOW()'), _test=True)
             >>> q
             <sql: "INSERT INTO foo (age, created, name) VALUES (2, NOW(), 'bob')">
+            >>> q.query()
+            'INSERT INTO foo (age, created, name) VALUES (%s, NOW(), %s)'
+            >>> q.values()
+            [2, 'bob']
         """
+
+        def q(x):
+            return "(" + x + ")"
+
         if values:
-            sorted_values = sorted(values.items())
+            # needed for Py3 compatibility with the above doctests
+            sorted_values = sorted(values.items(), key=lambda t: t[0])
+
             _keys = SQLQuery.join(map(lambda t: t[0], sorted_values), ", ")
             _values = SQLQuery.join(
                 [sqlparam(v) for v in map(lambda t: t[1], sorted_values)], ", "
             )
-            sql_query = SQLQuery(
-                f"INSERT INTO {tablename} ({_keys}) VALUES ({_values})"
+            sql_query = (
+                "INSERT INTO %s " % tablename + q(_keys) + " VALUES " + q(_values)
             )
         else:
             sql_query = SQLQuery(self._get_insert_default_values_query(tablename))
@@ -1297,53 +979,42 @@ class DB:
 
         db_cursor = self._db_cursor()
         if seqname is not False:
-            processed_query = self._process_insert_query(sql_query, tablename, seqname)
-        else:
-            processed_query = sql_query
+            sql_query = self._process_insert_query(sql_query, tablename, seqname)
 
-        if isinstance(processed_query, tuple):
-            q1, q2 = processed_query
+        if isinstance(sql_query, tuple):
+            # for some databases, a separate query has to be made to find
+            # the id of the inserted row.
+            q1, q2 = sql_query
             self._db_execute(db_cursor, q1)
             self._db_execute(db_cursor, q2)
         else:
-            self._db_execute(db_cursor, processed_query)
+            self._db_execute(db_cursor, sql_query)
 
         try:
-            out: Optional[int] = db_cursor.fetchone()[0]
+            out = db_cursor.fetchone()[0]
         except Exception:
             out = None
 
         if not self.ctx.transactions:
             self.ctx.commit()
+
         return out
 
-    def _get_insert_default_values_query(self, table: str) -> str:
-        """Returns the query for an insert with no values."""
-        return f"INSERT INTO {table} DEFAULT VALUES"
+    def _get_insert_default_values_query(self, table):
+        return "INSERT INTO %s DEFAULT VALUES" % table
 
-    def multiple_insert(
-        self,
-        tablename: str,
-        values: List[Dict[str, Any]],
-        seqname: Union[str, bool, None] = None,
-        _test: bool = False,
-    ) -> Union[List[int], None, SQLQuery]:
-        """Inserts multiple rows into a table in a single query.
+    def multiple_insert(self, tablename, values, seqname=None, _test=False):
+        """
+        Inserts multiple rows into `tablename`. The `values` must be a list of
+        dictionaries, one for each row to be inserted, each with the same set
+        of keys. Returns the list of ids of the inserted rows.
+        Set `seqname` to the ID if it's not the default, or to `False`
+        if there isn't one.
 
-        Args:
-            tablename: The name of the table.
-            values: A list of dictionaries, where each dict represents a row.
-            seqname: The name of the sequence for the primary key.
-            _test: If True, returns the generated SQLQuery without execution.
-
-        Returns:
-            A list of IDs for the inserted rows, None, or the SQLQuery if _test is True.
-
-        Examples:
             >>> db = DB(None, {})
             >>> db.supports_multiple_insert = True
-            >>> vals = [{"name": "foo", "email": "foo@example.com"}, {"name": "bar", "email": "bar@example.com"}]
-            >>> db.multiple_insert('person', values=vals, _test=True)
+            >>> values = [{"name": "foo", "email": "foo@example.com"}, {"name": "bar", "email": "bar@example.com"}]
+            >>> db.multiple_insert('person', values=values, _test=True)
             <sql: "INSERT INTO person (email, name) VALUES ('foo@example.com', 'foo'), ('bar@example.com', 'bar')">
         """
         if not values:
@@ -1354,14 +1025,24 @@ class DB:
                 self.insert(tablename, seqname=seqname, _test=_test, **v)
                 for v in values
             ]
-            return None if seqname is False else out
+            if seqname is False:
+                return None
+            else:
+                return out
 
-        keys = sorted(values[0].keys())
+        keys = values[0].keys()
+        # @@ make sure all keys are valid
+
         for v in values:
-            if sorted(v.keys()) != keys:
+            if v.keys() != keys:
                 raise ValueError("Not all rows have the same keys")
 
-        sql_query = SQLQuery(f"INSERT INTO {tablename} ({', '.join(keys)}) VALUES ")
+        # enforce query order for the above doctest compatibility with Py3
+        keys = sorted(keys)
+
+        sql_query = SQLQuery(
+            "INSERT INTO {} ({}) VALUES ".format(tablename, ", ".join(keys))
+        )
 
         for i, row in enumerate(values):
             if i != 0:
@@ -1378,70 +1059,63 @@ class DB:
             return sql_query
 
         db_cursor = self._db_cursor()
-        processed_query = self._process_insert_query(sql_query, tablename, seqname)
+        if seqname is not False:
+            sql_query = self._process_insert_query(sql_query, tablename, seqname)
 
-        if isinstance(processed_query, tuple):
-            q1, q2 = processed_query
+        if isinstance(sql_query, tuple):
+            # for some databases, a separate query has to be made to find
+            # the id of the inserted row.
+            q1, q2 = sql_query
             self._db_execute(db_cursor, q1)
             self._db_execute(db_cursor, q2)
         else:
-            self._db_execute(db_cursor, processed_query)
+            self._db_execute(db_cursor, sql_query)
 
         try:
-            first_id = db_cursor.fetchone()[0]
+            out = db_cursor.fetchone()[0]
+
+            # MySQL gives the first id of multiple inserted rows.
+            # PostgreSQL and SQLite give the last id.
             if self.db_module.__name__ in mysql_drivers:
-                result_ids: Optional[List[int]] = list(range(first_id, first_id + len(values)))
+                out = range(out, out + len(values))
             else:
-                result_ids = list(range(first_id - len(values) + 1, first_id + 1))
+                out = range(out - len(values) + 1, out + 1)
         except Exception:
-            result_ids = None
+            out = None
 
         if not self.ctx.transactions:
             self.ctx.commit()
-        return result_ids
+        return out
 
-    def update(
-        self,
-        tables: Union[str, List[str]],
-        where: Any,
-        vars: Optional[Dict[str, Any]] = None,
-        _test: bool = False,
-        **values: Any,
-    ) -> Union[int, SQLQuery]:
-        """Updates rows in a table.
+    def update(self, tables, where, vars=None, _test=False, **values):
+        """
+        Update `tables` with clause `where` (interpolated using `vars`)
+        and setting `values`.
 
-        Args:
-            tables: The table(s) to update.
-            where: The WHERE clause to identify rows.
-            vars: Dictionary of variables for `where` clause interpolation.
-            _test: If True, returns the generated SQLQuery without execution.
-            **values: Key-value pairs to set for the updated rows.
-
-        Returns:
-            The number of rows updated, or the SQLQuery if _test is True.
-
-        Examples:
             >>> db = DB(None, {})
             >>> name = 'Joseph'
-            >>> q = db.update('foo', where='name = $name', name='bob', age=2, created=SQLLiteral('NOW()'), vars=locals(), _test=True)
+            >>> q = db.update('foo', where='name = $name', name='bob', age=2,
+            ...     created=SQLLiteral('NOW()'), vars=locals(), _test=True)
             >>> q
             <sql: "UPDATE foo SET age = 2, created = NOW(), name = 'bob' WHERE name = 'Joseph'">
+            >>> q.query()
+            'UPDATE foo SET age = %s, created = NOW(), name = %s WHERE name = %s'
+            >>> q.values()
+            [2, 'bob', 'Joseph']
         """
         if vars is None:
             vars = {}
 
-        where_clause = self._where(where, vars)
-        sorted_values = sorted(values.items())
+        where = self._where(where, vars)
+        values = sorted(values.items(), key=lambda t: t[0])
 
-        query = SQLQuery(
-            [
-                "UPDATE ",
-                sqllist(tables),
-                " SET ",
-                sqlwhere(sorted_values, ", "),
-                " WHERE ",
-                where_clause,
-            ]
+        query = (
+            "UPDATE "
+            + sqllist(tables)
+            + " SET "
+            + sqlwhere(values, ", ")
+            + " WHERE "
+            + where
         )
 
         if _test:
@@ -1453,27 +1127,10 @@ class DB:
             self.ctx.commit()
         return db_cursor.rowcount
 
-    def delete(
-        self,
-        table: str,
-        where: Any,
-        using: Optional[Union[str, List[str]]] = None,
-        vars: Optional[Dict[str, Any]] = None,
-        _test: bool = False,
-    ) -> Union[int, SQLQuery]:
-        """Deletes rows from a table.
+    def delete(self, table, where, using=None, vars=None, _test=False):
+        """
+        Deletes from `table` with clauses `where` and `using`.
 
-        Args:
-            table: The table to delete from.
-            where: The WHERE clause to identify rows.
-            using: The USING clause (for joins in deletes).
-            vars: Dictionary of variables for `where` clause interpolation.
-            _test: If True, returns the generated SQLQuery without execution.
-
-        Returns:
-            The number of rows deleted, or the SQLQuery if _test is True.
-
-        Examples:
             >>> db = DB(None, {})
             >>> name = 'Joe'
             >>> db.delete('foo', where='name = $name', vars=locals(), _test=True)
@@ -1482,244 +1139,198 @@ class DB:
         if vars is None:
             vars = {}
 
-        where_clause = self._where(where, vars)
-        q_parts = [f"DELETE FROM {table}"]
-        if using:
-            q_parts.append(f" USING {sqllist(using)}")
-        if where_clause:
-            q_parts.append(" WHERE ")
-            q_parts.append(where_clause)
+        where = self._where(where, vars)
 
-        query = SQLQuery(q_parts)
+        q = "DELETE FROM " + table
+        if using:
+            q += " USING " + sqllist(using)
+
+        if where:
+            q += " WHERE " + where
 
         if _test:
-            return query
+            return q
 
         db_cursor = self._db_cursor()
-        self._db_execute(db_cursor, query)
+        self._db_execute(db_cursor, q)
         if not self.ctx.transactions:
             self.ctx.commit()
         return db_cursor.rowcount
 
-    def _process_insert_query(
-        self, query: SQLQuery, tablename: str, seqname: Union[str, bool, None]
-    ) -> Union[SQLQuery, Tuple[SQLQuery, SQLQuery]]:
-        """Hook for database-specific insert query processing."""
+    def _process_insert_query(self, query, tablename, seqname):
         return query
 
-    def transaction(self) -> Transaction:
-        """Starts a new database transaction.
-
-        Returns:
-            A Transaction object, to be used in a `with` statement.
-        """
+    def transaction(self):
+        """Start a transaction."""
         return Transaction(self.ctx)
 
 
 class PostgresDB(DB):
-    """PostgreSQL database driver."""
+    """Postgres driver."""
 
-    def __init__(self, **keywords: Any) -> None:
-        """Initializes the PostgreSQL connection.
-
-        Args:
-            **keywords: Connection parameters. `pw` is an alias for `password`,
-                and `db` is an alias for `database`.
-        """
+    def __init__(self, **keywords):
         if "pw" in keywords:
             keywords["password"] = keywords.pop("pw")
-        if "db" in keywords:
-            keywords["database"] = keywords.pop("db")
 
         db_module = import_driver(pg_drivers, preferred=keywords.pop("driver", None))
         if db_module.__name__ == "psycopg2":
             import psycopg2.extensions
+
             psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)
+
+        # if db is not provided `postgres` driver will take it from PGDATABASE
+        # environment variable.
+        if "db" in keywords:
+            keywords["database"] = keywords.pop("db")
 
         self.dbname = "postgres"
         self.paramstyle = db_module.paramstyle
-        super().__init__(db_module, keywords)
+        DB.__init__(self, db_module, keywords)
         self.supports_multiple_insert = True
-        self._sequences: Optional[Set[str]] = None
+        self._sequences = None
 
-    def _process_insert_query(
-        self, query: SQLQuery, tablename: str, seqname: Union[str, bool, None]
-    ) -> SQLQuery:
-        """Appends a `RETURNING id` or `currval` query for PostgreSQL."""
+    def _process_insert_query(self, query, tablename, seqname):
         if seqname is None:
-            seqname = f"{tablename}_id_seq"
+            # when seqname is not provided guess the seqname and make sure it exists
+            seqname = tablename + "_id_seq"
             if seqname not in self._get_all_sequences():
                 seqname = None
 
         if seqname:
-            query += self.get_sequence_query(str(seqname))
+            query += self.get_sequence_query(seqname)
+
         return query
 
-    def get_sequence_query(self, seqname: str) -> SQLQuery:
-        """Creates a query to get the current value of a sequence."""
+    def get_sequence_query(self, seqname):
+        import re
+
+        # Ensure the sequence name is valid
         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_$]*$", seqname):
             raise ValueError(f"Invalid sequence name: {seqname}")
         return SQLQuery(f"; SELECT currval('{seqname}')")
 
-    def _get_all_sequences(self) -> Set[str]:
-        """Queries PostgreSQL for all sequence names in the database."""
+    def _get_all_sequences(self):
+        """Query postgres to find names of all sequences used in this database."""
         if self._sequences is None:
             q = "SELECT c.relname FROM pg_class c WHERE c.relkind = 'S'"
             self._sequences = {c.relname for c in self.query(q)}
         return self._sequences
 
-    def _connect(self, keywords: Dict[str, Any]) -> Any:
-        """Connects to PostgreSQL and sets client encoding."""
-        conn = super()._connect(keywords)
+    def _connect(self, keywords):
+        conn = DB._connect(self, keywords)
         conn.set_client_encoding("UTF8")
         return conn
 
-    def _connect_with_pooling(self, keywords: Dict[str, Any]) -> Any:
-        """Connects with pooling and sets client encoding."""
-        conn = super()._connect_with_pooling(keywords)
+    def _connect_with_pooling(self, keywords):
+        conn = DB._connect_with_pooling(self, keywords)
         conn._con._con.set_client_encoding("UTF8")
         return conn
 
 
 class MySQLDB(DB):
-    """MySQL/MariaDB database driver."""
+    def __init__(self, **keywords):
+        db = import_driver(mysql_drivers, preferred=keywords.pop("driver", None))
 
-    def __init__(self, **keywords: Any) -> None:
-        """Initializes the MySQL connection.
+        if db.__name__ == "pymysql":
+            if "pw" in keywords:
+                keywords["password"] = keywords["pw"]
+                del keywords["pw"]
 
-        Args:
-            **keywords: Connection parameters. `pw` is an alias for `password`.
-        """
-        db_module = import_driver(mysql_drivers, preferred=keywords.pop("driver", None))
-
-        if "pw" in keywords:
-            if db_module.__name__ == "MySQLdb":
+        elif db.__name__ == "MySQLdb":
+            if "pw" in keywords:
                 keywords["passwd"] = keywords.pop("pw")
-            else:  # pymysql, mysql.connector
-                keywords["password"] = keywords.pop("pw")
 
-        if db_module.__name__ == "mysql.connector":
+        elif db.__name__ == "mysql.connector":
+            # Enabled buffered so that len can work as expected.
             keywords.setdefault("buffered", True)
 
-        keywords.setdefault("charset", "utf8")
-        if keywords["charset"] is None:
+            if "pw" in keywords:
+                keywords["password"] = keywords["pw"]
+                del keywords["pw"]
+
+        if "charset" not in keywords:
+            keywords["charset"] = "utf8"
+        elif keywords["charset"] is None:
             del keywords["charset"]
 
-        self.paramstyle = "pyformat"
+        self.paramstyle = db.paramstyle = "pyformat"  # it's both
         self.dbname = "mysql"
-        super().__init__(db_module, keywords)
+        DB.__init__(self, db, keywords)
         self.supports_multiple_insert = True
 
-    def _process_insert_query(
-        self, query: SQLQuery, tablename: str, seqname: Union[str, bool, None]
-    ) -> Tuple[SQLQuery, SQLQuery]:
-        """Appends a query to get the last inserted ID for MySQL."""
+    def _process_insert_query(self, query, tablename, seqname):
         return query, SQLQuery("SELECT last_insert_id();")
 
-    def _get_insert_default_values_query(self, table: str) -> str:
-        """Returns the query for an insert with no values for MySQL."""
-        return f"INSERT INTO {table} () VALUES()"
+    def _get_insert_default_values_query(self, table):
+        return "INSERT INTO %s () VALUES()" % table
 
 
-def import_driver(drivers: Tuple[str, ...], preferred: Optional[str] = None) -> ModuleType:
-    """Imports the first available database driver from a list.
+def import_driver(drivers, preferred=None):
+    """Import the first available driver or preferred driver."""
+    if preferred:
+        drivers = (preferred,)
 
-    Args:
-        drivers: A tuple of driver names to try.
-        preferred: A specific driver to try first.
-
-    Returns:
-        The imported driver module.
-
-    Raises:
-        ImportError: If no suitable driver can be imported.
-    """
-    driver_list = (preferred,) if preferred else drivers
-    for d in driver_list:
+    for d in drivers:
         try:
             return __import__(d, None, None, ["x"])
         except ImportError:
             pass
-    raise ImportError(f"Unable to import {' or '.join(drivers)}")
+    raise ImportError("Unable to import " + " or ".join(drivers))
 
 
 class SqliteDB(DB):
-    """SQLite database driver."""
+    def __init__(self, **keywords):
+        db = import_driver(sqlite_drivers, preferred=keywords.pop("driver", None))
 
-    def __init__(self, **keywords: Any) -> None:
-        """Initializes the SQLite connection.
+        if db.__name__ in ["sqlite3", "pysqlite2.dbapi2"]:
+            db.paramstyle = "qmark"
 
-        Args:
-            **keywords: Connection parameters. `db` is used for the database file path.
-        """
-        db_module = import_driver(sqlite_drivers, preferred=keywords.pop("driver", None))
-
-        if db_module.__name__ in ["sqlite3", "pysqlite2.dbapi2"]:
-            db_module.paramstyle = "qmark"
-            keywords.setdefault("detect_types", db_module.PARSE_DECLTYPES)
+        # sqlite driver doesn't create datatime objects for timestamp columns
+        # unless `detect_types` option is passed.
+        # It seems to be supported in `sqlite3` and `pysqlite2` drivers, not
+        # surte about `sqlite`.
+        keywords.setdefault("detect_types", db.PARSE_DECLTYPES)
 
         self.dbname = "sqlite"
-        self.paramstyle = db_module.paramstyle
+        self.paramstyle = db.paramstyle
         keywords["database"] = keywords.pop("db")
-        keywords["pooling"] = False  # SQLite doesn't allow connection sharing
 
-        super().__init__(db_module, keywords)
+        # sqlite don't allows connections to be shared by threads
+        keywords["pooling"] = False
 
-    def _process_insert_query(
-        self, query: SQLQuery, tablename: str, seqname: Union[str, bool, None]
-    ) -> Tuple[SQLQuery, SQLQuery]:
-        """Appends a query to get the last inserted row ID for SQLite."""
+        DB.__init__(self, db, keywords)
+
+    def _process_insert_query(self, query, tablename, seqname):
         return query, SQLQuery("SELECT last_insert_rowid();")
 
-    def create_result_set(self, cursor: Any) -> SqliteResultSet:
-        """Creates a SqliteResultSet from a cursor."""
+    def create_result_set(self, cursor):
         return SqliteResultSet(cursor)
 
 
 class FirebirdDB(DB):
-    """Firebird database driver."""
+    """Firebird Database."""
 
-    def __init__(self, **keywords: Any) -> None:
-        """Initializes the Firebird connection.
-
-        Args:
-            **keywords: Connection parameters. `pw` is an alias for `password`,
-                and `db` is an alias for `database`.
-        """
+    def __init__(self, **keywords):
         try:
             import kinterbasdb as db
-        except ImportError:
-            raise
+        except Exception:
+            db = None
+            pass
         if "pw" in keywords:
             keywords["password"] = keywords.pop("pw")
         keywords["database"] = keywords.pop("db")
 
         self.paramstyle = db.paramstyle
-        super().__init__(db, keywords)
 
-    def delete(
-        self,
-        table: str,
-        where: Any,
-        using: Optional[Union[str, List[str]]] = None,
-        vars: Optional[Dict[str, Any]] = None,
-        _test: bool = False,
-    ) -> Union[int, SQLQuery]:
-        """Deletes from a table. Firebird does not support the USING clause."""
-        return super().delete(table, where, using=None, vars=vars, _test=_test)
+        DB.__init__(self, db, keywords)
 
-    def sql_clauses(
-        self,
-        what: str,
-        tables: Union[str, List[str]],
-        where: Any,
-        group: Optional[str],
-        order: Optional[str],
-        limit: Optional[int],
-        offset: Optional[int],
-    ) -> List[Tuple[str, Any]]:
-        """Generates SQL clauses for Firebird, using FIRST and SKIP for limit/offset."""
-        return [
+    def delete(self, table, where=None, using=None, vars=None, _test=False):
+        # firebird doesn't support using clause
+        using = None
+        return DB.delete(self, table, where, using, vars, _test)
+
+    def sql_clauses(self, what, tables, where, group, order, limit, offset):
+        return (
             ("SELECT", ""),
             ("FIRST", limit),
             ("SKIP", offset),
@@ -1728,46 +1339,30 @@ class FirebirdDB(DB):
             ("WHERE", where),
             ("GROUP BY", group),
             ("ORDER BY", order),
-        ]
+        )
 
 
 class MSSQLDB(DB):
-    """Microsoft SQL Server database driver."""
-
-    def __init__(self, **keywords: Any) -> None:
-        """Initializes the MS SQL Server connection.
-
-        Args:
-            **keywords: Connection parameters. `pw` is an alias for `password`,
-                and `db` is an alias for `database`.
-        """
+    def __init__(self, **keywords):
         import pymssql as db
 
         if "pw" in keywords:
             keywords["password"] = keywords.pop("pw")
         keywords["database"] = keywords.pop("db")
         self.dbname = "mssql"
-        super().__init__(db, keywords)
+        DB.__init__(self, db, keywords)
 
-    def _process_query(self, sql_query: SQLQuery) -> Tuple[str, Tuple[Any, ...]]:
-        """Processes query, ensuring parameters are a tuple for pymssql."""
+    def _process_query(self, sql_query):
+        """Takes the SQLQuery object and returns query string and parameters."""
+        # MSSQLDB expects params to be a tuple.
+        # Overwriting the default implementation to convert params to tuple.
         paramstyle = getattr(self, "paramstyle", "pyformat")
         query = sql_query.query(paramstyle)
         params = sql_query.values()
         return query, tuple(params)
 
-    def sql_clauses(
-        self,
-        what: str,
-        tables: Union[str, List[str]],
-        where: Any,
-        group: Optional[str],
-        order: Optional[str],
-        limit: Optional[int],
-        offset: Optional[int],
-    ) -> List[Tuple[str, Any]]:
-        """Generates SQL clauses for MS SQL, using TOP for limit."""
-        return [
+    def sql_clauses(self, what, tables, where, group, order, limit, offset):
+        return (
             ("SELECT", what),
             ("TOP", limit),
             ("FROM", sqllist(tables)),
@@ -1775,10 +1370,10 @@ class MSSQLDB(DB):
             ("GROUP BY", group),
             ("ORDER BY", order),
             ("OFFSET", offset),
-        ]
+        )
 
-    def _test(self) -> None:
-        """Test for the LIMIT to TOP clause conversion.
+    def _test(self):
+        """Test LIMIT.
 
         Fake presence of pymssql module for running tests.
         >>> import sys
@@ -1793,53 +1388,51 @@ class MSSQLDB(DB):
 
 
 class OracleDB(DB):
-    """Oracle database driver."""
-
-    def __init__(self, **keywords: Any) -> None:
-        """Initializes the Oracle connection.
-
-        Args:
-            **keywords: Connection parameters. `pw` is an alias for `password`,
-                and `db` is used for the DSN.
-        """
+    def __init__(self, **keywords):
         import cx_Oracle as db
 
         if "pw" in keywords:
             keywords["password"] = keywords.pop("pw")
 
+        # @@ TODO: use db.makedsn if host, port is specified
         keywords["dsn"] = keywords.pop("db")
         self.dbname = "oracle"
         db.paramstyle = "numeric"
         self.paramstyle = db.paramstyle
 
+        # oracle doesn't support pooling
         keywords.pop("pooling", None)
-        super().__init__(db, keywords)
+        DB.__init__(self, db, keywords)
 
-    def _process_insert_query(
-        self, query: SQLQuery, tablename: str, seqname: Union[str, bool, None]
-    ) -> SQLQuery:
-        """Appends a query to get the current sequence value for Oracle."""
-        if seqname:
-            return query + f"; SELECT {seqname}.currval FROM dual"
-        return query
+    def _process_insert_query(self, query, tablename, seqname):
+        if seqname is None:
+            # It is not possible to get seq name from table name in Oracle
+            return query
+        else:
+            return query + "; SELECT %s.currval FROM dual" % seqname
 
 
-def dburl2dict(url: str) -> Dict[str, Any]:
-    """Parses a database URL into a dictionary of connection parameters.
+def dburl2dict(url):
+    """
+    Takes a URL to a database and parses it into an equivalent dictionary.
 
-    Args:
-        url: The database URL string (e.g., 'postgres://user:pw@host/db').
-
-    Returns:
-        A dictionary of connection parameters.
-
-    Examples:
-        >>> dburl2dict('postgres://james:day@server:5432/mygreatdb')
-        {'dbn': 'postgres', 'user': 'james', 'pw': 'day', 'db': 'mygreatdb', 'host': 'server', 'port': 5432}
-        >>> dburl2dict('sqlite:///path/to/db.sqlite')
-        {'dbn': 'sqlite', 'db': '/path/to/db.sqlite'}
+        >>> dburl2dict('postgres:///mygreatdb') == {'pw': None, 'dbn': 'postgres', 'db': 'mygreatdb', 'host': None, 'user': None, 'port': None}
+        True
+        >>> dburl2dict('postgres://james:day@serverfarm.example.net:5432/mygreatdb') == {'pw': 'day', 'dbn': 'postgres', 'db': 'mygreatdb', 'host': 'serverfarm.example.net', 'user': 'james', 'port': 5432}
+        True
+        >>> dburl2dict('postgres://james:day@serverfarm.example.net/mygreatdb') == {'pw': 'day', 'dbn': 'postgres', 'db': 'mygreatdb', 'host': 'serverfarm.example.net', 'user': 'james', 'port': None}
+        True
+        >>> dburl2dict('postgres://james:d%40y@serverfarm.example.net/mygreatdb') == {'pw': 'd@y', 'dbn': 'postgres', 'db': 'mygreatdb', 'host': 'serverfarm.example.net', 'user': 'james', 'port': None}
+        True
+        >>> dburl2dict('mysql://james:d%40y@serverfarm.example.net/mygreatdb') == {'pw': 'd@y', 'dbn': 'mysql', 'db': 'mygreatdb', 'host': 'serverfarm.example.net', 'user': 'james', 'port': None}
+        True
+        >>> dburl2dict('sqlite:///mygreatdb.db')
+        {'db': 'mygreatdb.db', 'dbn': 'sqlite'}
+        >>> dburl2dict('sqlite:////absolute/path/mygreatdb.db')
+        {'db': '/absolute/path/mygreatdb.db', 'dbn': 'sqlite'}
     """
     parts = urlparse(unquote(url))
+
     if parts.scheme == "sqlite":
         return {"dbn": parts.scheme, "db": parts.path[1:]}
     else:
@@ -1853,30 +1446,17 @@ def dburl2dict(url: str) -> Dict[str, Any]:
         }
 
 
-_databases: Dict[str, Type[DB]] = {}
+_databases = {}
 
 
-def database(dburl: Optional[str] = None, **params: Any) -> DB:
-    """Creates a database interface from a URL or keyword arguments.
+def database(dburl=None, **params):
+    """Creates appropriate database using params.
 
-    Connection pooling is enabled by default if the `dbutils` module is available.
-    It can be disabled by passing `pooling=False`.
-
-    Args:
-        dburl: A database URL. If provided, it overrides `params`.
-        **params: Keyword arguments for the connection (e.g., dbn, db, user).
-
-    Returns:
-        An initialized DB object for the specified database.
-
-    Raises:
-        UnknownDB: If the specified `dbn` is not registered.
-        ValueError: If no connection info is provided.
+    Pooling will be enabled if DBUtils module is available.
+    Pooling can be disabled by passing pooling=False in params.
     """
     if not dburl and not params:
-        dburl = os.environ.get("DATABASE_URL")
-        if not dburl:
-            raise ValueError("DATABASE_URL env var not set or no params provided")
+        dburl = os.environ["DATABASE_URL"]
 
     if dburl:
         params = dburl2dict(dburl)
@@ -1888,16 +1468,16 @@ def database(dburl: Optional[str] = None, **params: Any) -> DB:
         raise UnknownDB(dbn)
 
 
-def register_database(name: str, clazz: Type[DB]) -> None:
-    """Registers a new database driver class.
+def register_database(name, clazz):
+    """
+    Register a database.
 
-    Args:
-        name: The name to register the driver under (e.g., 'mysql').
-        clazz: The DB subclass to associate with the name.
-
-    Examples:
-        >>> class MyCustomDB(DB): pass
-        >>> register_database('custom', MyCustomDB)
+        >>> class LegacyDB(DB):
+        ...     def __init__(self, **params):
+        ...        pass
+        ...
+        >>> register_database('legacy', LegacyDB)
+        >>> db = database(dbn='legacy', db='test', user='joe', passwd='secret')
     """
     _databases[name] = clazz
 
@@ -1910,100 +1490,83 @@ register_database("mssql", MSSQLDB)
 register_database("oracle", OracleDB)
 
 
-def _interpolate(format_str: str) -> List[Tuple[int, str]]:
-    """Internal helper to parse a format string for interpolation.
-
+def _interpolate(format):
+    """
     Takes a format string and returns a list of 2-tuples of the form
-    (eval_flag, string) where eval_flag is 1 if the string should be
-    evaluated, and 0 otherwise.
+    (boolean, string) where boolean says whether string should be evaled
+    or not.
 
-    From <http://lfw.org/python/Itpl.py> (public domain, Ka-Ping Yee).
-
-    Args:
-        format_str: The string to parse.
-
-    Returns:
-        A list of tuples for evaluation.
+    from <http://lfw.org/python/Itpl.py> (public domain, Ka-Ping Yee)
     """
 
-    def matchorfail(text: str, pos: int) -> Tuple[re.Match, int]:
+    def matchorfail(text, pos):
         match = tokenprog.match(text, pos)
         if match is None:
             raise _ItplError(text, pos)
         return match, match.end()
 
     namechars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
-    chunks: List[Tuple[int, str]] = []
+    chunks = []
     pos = 0
 
-    while True:
-        dollar = format_str.find("$", pos)
+    while 1:
+        dollar = format.find("$", pos)
         if dollar < 0:
             break
-        nextchar = format_str[dollar + 1]
+        nextchar = format[dollar + 1]
 
         if nextchar == "{":
-            chunks.append((0, format_str[pos:dollar]))
+            chunks.append((0, format[pos:dollar]))
             pos, level = dollar + 2, 1
             while level:
-                match, pos = matchorfail(format_str, pos)
+                match, pos = matchorfail(format, pos)
                 tstart, tend = match.regs[3]
-                token = format_str[tstart:tend]
+                token = format[tstart:tend]
                 if token == "{":
-                    level += 1
+                    level = level + 1
                 elif token == "}":
-                    level -= 1
-            chunks.append((1, format_str[dollar + 2 : pos - 1]))
+                    level = level - 1
+            chunks.append((1, format[dollar + 2 : pos - 1]))
 
         elif nextchar in namechars:
-            chunks.append((0, format_str[pos:dollar]))
-            match, pos = matchorfail(format_str, dollar + 1)
-            while pos < len(format_str):
+            chunks.append((0, format[pos:dollar]))
+            match, pos = matchorfail(format, dollar + 1)
+            while pos < len(format):
                 if (
-                    format_str[pos] == "."
-                    and pos + 1 < len(format_str)
-                    and format_str[pos + 1] in namechars
+                    format[pos] == "."
+                    and pos + 1 < len(format)
+                    and format[pos + 1] in namechars
                 ):
-                    match, pos = matchorfail(format_str, pos + 1)
-                elif format_str[pos] in "([":
+                    match, pos = matchorfail(format, pos + 1)
+                elif format[pos] in "([":
                     pos, level = pos + 1, 1
                     while level:
-                        match, pos = matchorfail(format_str, pos)
+                        match, pos = matchorfail(format, pos)
                         tstart, tend = match.regs[3]
-                        token = format_str[tstart:tend]
+                        token = format[tstart:tend]
                         if token[0] in "([":
-                            level += 1
+                            level = level + 1
                         elif token[0] in ")]":
-                            level -= 1
+                            level = level - 1
                 else:
                     break
-            chunks.append((1, format_str[dollar + 1 : pos]))
+            chunks.append((1, format[dollar + 1 : pos]))
         else:
-            chunks.append((0, format_str[pos : dollar + 1]))
+            chunks.append((0, format[pos : dollar + 1]))
             pos = dollar + 1 + (nextchar == "$")
 
-    if pos < len(format_str):
-        chunks.append((0, format_str[pos:]))
+    if pos < len(format):
+        chunks.append((0, format[pos:]))
     return chunks
 
 
 class _Node:
-    """An internal node for the expression parser tree."""
-
-    def __init__(self, type: str, first: Any, second: Any = None) -> None:
-        """Initializes a parser node.
-
-        Args:
-            type: The type of the node (e.g., 'text', 'param').
-            first: The primary value of the node.
-            second: The secondary value, if any.
-        """
+    def __init__(self, type, first, second=None):
         self.type = type
         self.first = first
         self.second = second
 
-    def __eq__(self, other: Any) -> bool:
-        """Checks for equality with another node."""
+    def __eq__(self, other):
         return (
             isinstance(other, _Node)
             and self.type == other.type
@@ -2011,44 +1574,33 @@ class _Node:
             and self.second == other.second
         )
 
-    def __repr__(self) -> str:
-        """Returns the formal representation of the node."""
+    def __repr__(self):
         return f"Node({self.type!r}, {self.first!r}, {self.second!r})"
 
 
 class Parser:
-    """Internal parser for string templates like "Hello $name".
+    """Parser to parse string templates like "Hello $name".
 
-    Loosely based on <http://lfw.org/python/Itpl.py> (public domain, Ka-Ping Yee).
+    Loosely based on <http://lfw.org/python/Itpl.py> (public domain, Ka-Ping Yee)
     """
 
     namechars = "abcdefghijklmnopqrstuvwxyz" "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 
-    def __init__(self) -> None:
-        """Initializes the parser."""
+    def __init__(self):
         self.reset()
 
-    def reset(self) -> None:
-        """Resets the parser's internal state."""
+    def reset(self):
         self.pos = 0
         self.level = 0
         self.text = ""
 
-    def parse(self, text: str) -> Iterator[_Node]:
-        """Parses the given text and yields a sequence of nodes.
-
-        Args:
-            text: The template string to parse.
-
-        Returns:
-            An iterator of _Node objects representing the parsed tree.
-        """
+    def parse(self, text):
+        """Parses the given text and returns a parse tree."""
         self.reset()
         self.text = text
         return self.parse_all()
 
-    def parse_all(self) -> Iterator[_Node]:
-        """The main parsing loop."""
+    def parse_all(self):
         while True:
             dollar = self.text.find("$", self.pos)
             if dollar < 0:
@@ -2058,13 +1610,15 @@ class Parser:
                 yield _Node("text", self.text[self.pos : dollar])
                 self.pos = dollar + 1
                 yield self.parse_expr()
+
+            # for supporting ${x.id}, for backward compatibility
             elif nextchar == "{":
                 saved_pos = self.pos
-                self.pos = dollar + 2
+                self.pos = dollar + 2  # skip "${"
                 expr = self.parse_expr()
                 if self.text[self.pos] == "}":
                     self.pos += 1
-                    yield _Node("text", self.text[saved_pos : dollar])
+                    yield _Node("text", self.text[self.pos : dollar])
                     yield expr
                 else:
                     self.pos = saved_pos
@@ -2072,24 +1626,23 @@ class Parser:
             else:
                 yield _Node("text", self.text[self.pos : dollar + 1])
                 self.pos = dollar + 1
+                # $$ is used to escape $
                 if nextchar == "$":
                     self.pos += 1
+
         if self.pos < len(self.text):
             yield _Node("text", self.text[self.pos :])
 
-    def match(self) -> Tuple[re.Match, int]:
-        """Matches the next token in the text."""
+    def match(self):
         match = tokenprog.match(self.text, self.pos)
         if match is None:
             raise _ItplError(self.text, self.pos)
         return match, match.end()
 
-    def is_literal(self, text: str) -> bool:
-        """Checks if a token is a literal value."""
+    def is_literal(self, text):
         return text and text[0] in "0123456789\"'"
 
-    def parse_expr(self) -> _Node:
-        """Parses a single expression (e.g., $name.attribute)."""
+    def parse_expr(self):
         match, pos = self.match()
         if self.is_literal(match.group()):
             expr = _Node("literal", match.group())
@@ -2123,30 +1676,19 @@ class Parser:
 
 
 class SafeEval:
-    """A safe evaluator for binding parameters to database queries."""
+    """Safe evaluator for binding params to db queries."""
 
-    def safeeval(self, text: str, mapping: Dict[str, Any]) -> SQLQuery:
-        """Safely evaluates a template string against a mapping.
-
-        Args:
-            text: The template string to evaluate.
-            mapping: A dictionary of variables to use for substitution.
-
-        Returns:
-            An SQLQuery object with the evaluated result.
-        """
+    def safeeval(self, text, mapping):
         nodes = Parser().parse(text)
         return SQLQuery.join([self.eval_node(node, mapping) for node in nodes], "")
 
-    def eval_node(self, node: _Node, mapping: Dict[str, Any]) -> Any:
-        """Evaluates a single node from the parse tree."""
+    def eval_node(self, node, mapping):
         if node.type == "text":
             return node.first
         else:
             return sqlquote(self.eval_expr(node, mapping))
 
-    def eval_expr(self, node: _Node, mapping: Dict[str, Any]) -> Any:
-        """Recursively evaluates an expression node."""
+    def eval_expr(self, node, mapping):
         if node.type == "literal":
             return ast.literal_eval(node.first)
         elif node.type == "getattr":
@@ -2159,14 +1701,12 @@ class SafeEval:
             return mapping[node.first]
 
 
-def test_parser() -> None:
-    """Tests the internal Parser class."""
-
-    def f(text: str, expected: List[_Node]) -> None:
+def test_parser():
+    def f(text, expected):
         p = Parser()
         nodes = list(p.parse(text))
         print(repr(text), nodes)
-        assert nodes == expected, f"Expected {expected!r}"
+        assert nodes == expected, "Expected %r" % expected
 
     f("Hello", [_Node("text", "Hello")])
     f("Hello $name", [_Node("text", "Hello "), _Node("param", "name")])
@@ -2178,24 +1718,23 @@ def test_parser() -> None:
         "WHERE id=$self.id LIMIT 1",
         [
             _Node("text", "WHERE id="),
-            _Node("getattr", _Node("param", "self"), "id"),
+            _Node("getattr", _Node("param", "self", None), "id"),
             _Node("text", " LIMIT 1"),
         ],
     )
+
     f(
         "WHERE id=$self['id'] LIMIT 1",
         [
             _Node("text", "WHERE id="),
-            _Node("getitem", _Node("param", "self"), _Node("literal", "'id'")),
+            _Node("getitem", _Node("param", "self", None), _Node("literal", "'id'")),
             _Node("text", " LIMIT 1"),
         ],
     )
 
 
-def test_safeeval() -> None:
-    """Tests the internal SafeEval class."""
-
-    def f(q: str, vars: Dict[str, Any]) -> SQLQuery:
+def test_safeeval():
+    def f(q, vars):
         return SafeEval().safeeval(q, vars)
 
     print(f("WHERE id=$id", {"id": 1}).items)
@@ -2205,6 +1744,6 @@ def test_safeeval() -> None:
 if __name__ == "__main__":
     import doctest
 
-    doctest.testmod(optionflags=doctest.IGNORE_EXCEPTION_DETAIL | doctest.ELLIPSIS)
+    doctest.testmod()
     test_parser()
     test_safeeval()

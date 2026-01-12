@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""
-web.py: makes web apps (http://webpy.org)
-
-This module serves as the main entry point for the web.py framework,
-providing access to all core components through a single import.
-
-Examples:
-    >>> import web
-    >>> web.__version__
-    '0.70'
-"""
+"""web.py: makes web apps (http://webpy.org)"""
 
 from . import (  # noqa: F401
     db,

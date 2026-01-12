@@ -76,11 +76,6 @@ class Storage(dict):
     A Storage object is like a dictionary except `obj.foo` can be used
     in addition to `obj['foo']`.
 
-    Args:
-        *args: Arguments to pass to the parent dict constructor.
-        **kwargs: Keyword arguments to pass to the parent dict constructor.
-
-    Examples:
         >>> o = storage(a=1)
         >>> o.a
         1
@@ -95,8 +90,6 @@ class Storage(dict):
             ...
         AttributeError: 'a'
 
-    Returns:
-        Storage: A Storage object with the given key-value pairs.
     """
 
     def __getattr__(self, key):
@@ -153,13 +146,6 @@ def storify(mapping, *requireds, **defaults):
         >>> storify({}, a={}).a
         {}
 
-    Args:
-        mapping (dict): Dictionary to convert to Storage.
-        *requireds: Required keys in the mapping.
-        **defaults: Default values for keys.
-
-    Returns:
-        Storage: A Storage object with the converted dictionary.
     """
     _unicode = defaults.pop("_unicode", False)
 
@@ -207,94 +193,85 @@ def storify(mapping, *requireds, **defaults):
 
 
 class Counter(storage):
-    """
-    Keeps count of how many times something is added.
+    """Keeps count of how many times something is added.
 
-    Examples:
-        >>> c = counter()
-        >>> c.add('x')
-        >>> c.add('x')
-        >>> c.add('x')
-        >>> c.add('x')
-        >>> c.add('x')
-        >>> c.add('y')
-        >>> c['y']
-        1
-        >>> c['x']
-        5
-        >>> c.most()
-        ['x']
-
-    Returns:
-        Counter: A Counter object with the given counts.
+    >>> c = counter()
+    >>> c.add('x')
+    >>> c.add('x')
+    >>> c.add('x')
+    >>> c.add('x')
+    >>> c.add('x')
+    >>> c.add('y')
+    >>> c['y']
+    1
+    >>> c['x']
+    5
+    >>> c.most()
+    ['x']
     """
 
     def add(self, n):
-        """
-        Add a count to the counter.
-
-        Args:
-            n: The item to add to the counter.
-        """
         self.setdefault(n, 0)
         self[n] += 1
 
     def most(self):
-        """
-        Returns the keys with maximum count.
-
-        Returns:
-            list: List of keys with maximum count.
-        """
+        """Returns the keys with maximum count."""
         m = max(itervalues(self))
         return [k for k, v in iteritems(self) if v == m]
 
     def least(self):
-        """
-        Returns the keys with minimum count.
-
-        Returns:
-            list: List of keys with minimum count.
-        """
+        """Returns the keys with minimum count."""
         m = min(self.itervalues())
         return [k for k, v in iteritems(self) if v == m]
 
     def percent(self, key):
-        """
-        Returns what percentage a certain key is of all entries.
+        """Returns what percentage a certain key is of all entries.
 
-        Args:
-            key: The key to calculate the percentage for.
-
-        Returns:
-            float: The percentage of the key's count relative to total counts.
+        >>> c = counter()
+        >>> c.add('x')
+        >>> c.add('x')
+        >>> c.add('x')
+        >>> c.add('y')
+        >>> c.percent('x')
+        0.75
+        >>> c.percent('y')
+        0.25
         """
         return float(self[key]) / sum(self.values())
 
     def sorted_keys(self):
-        """
-        Returns keys sorted by value.
+        """Returns keys sorted by value.
 
-        Returns:
-            list: Keys sorted by their values in descending order.
+        >>> c = counter()
+        >>> c.add('x')
+        >>> c.add('x')
+        >>> c.add('y')
+        >>> c.sorted_keys()
+        ['x', 'y']
         """
         return sorted(self.keys(), key=lambda k: self[k], reverse=True)
 
     def sorted_values(self):
-        """
-        Returns values sorted by value.
+        """Returns values sorted by value.
 
-        Returns:
-            list: Values sorted by their values in descending order.
+        >>> c = counter()
+        >>> c.add('x')
+        >>> c.add('x')
+        >>> c.add('y')
+        >>> c.sorted_values()
+        [2, 1]
         """
         return [self[k] for k in self.sorted_keys()]
 
     def sorted_items(self):
-        """
-        Returns items sorted by value.
+        """Returns items sorted by value.
 
-        Returns:
-            list: Items (key, value) sorted by value in descending order.
+        >>> c = counter()
+        >>> c.add('x')
+        >>> c.add('x')
+        >>> c.add('y')
+        >>> c.sorted_items()
+        [('x', 2), ('y', 1)]
         """
         return [(k, self[k]) for k in self.sorted_keys()]
 
@@ -319,17 +296,6 @@ of lists, tuples, sets, and Sets are available in this version of Python.
 
 
 def _strips(direction, text, remove):
-    """
-    Helper function for stripping strings.
-
-    Args:
-        direction (str): Direction to strip ('l' or 'r').
-        text (str): Text to strip from.
-        remove (str or list): String(s) to remove.
-
-    Returns:
-        str: Stripped text.
-    """
     if isinstance(remove, iters):
         for subr in remove:
             text = _strips(direction, text, subr)
@@ -348,34 +314,19 @@ def _strips(direction, text, remove):
 
 def rstrips(text, remove):
     """
-    Removes the string `remove` from the right of `text`.
+    removes the string `remove` from the right of `text`
 
-    Args:
-        text (str): Text to strip from.
-        remove (str or list): String(s) to remove.
-
-    Returns:
-        str: Stripped text.
-
-    Examples:
         >>> rstrips("foobar", "bar")
         'foo'
+
     """
     return _strips("r", text, remove)
 
 
 def lstrips(text, remove):
     """
-    Removes the string `remove` from the left of `text`.
+    removes the string `remove` from the left of `text`
 
-    Args:
-        text (str): Text to strip from.
-        remove (str or list): String(s) to remove.
-
-    Returns:
-        str: Stripped text.
-
-    Examples:
         >>> lstrips("foobar", "foo")
         'bar'
         >>> lstrips('http://foo.org/', ['http://', 'https://'])
@@ -384,45 +335,32 @@ def lstrips(text, remove):
         'BAZ'
         >>> lstrips('FOOBARBAZ', ['BAR', 'FOO'])
         'BARBAZ'
+
     """
     return _strips("l", text, remove)
 
 
 def strips(text, remove):
     """
-    Removes the string `remove` from the both sides of `text`.
+    removes the string `remove` from the both sides of `text`
 
-    Args:
-        text (str): Text to strip from.
-        remove (str or list): String(s) to remove.
-
-    Returns:
-        str: Stripped text.
-
-    Examples:
         >>> strips("foobarfoo", "foo")
         'bar'
+
     """
     return rstrips(lstrips(text, remove), remove)
 
 
 def safestr(obj, encoding="utf-8"):
-    """
+    r"""
     Converts any given object to utf-8 encoded string.
 
-    Args:
-        obj: Object to convert.
-        encoding (str): Encoding to use (default is 'utf-8').
-
-    Returns:
-        str: UTF-8 encoded string representation of the object.
-
-    Examples:
         >>> safestr('hello')
         'hello'
         >>> safestr(2)
         '2'
     """
+
     if obj and hasattr(obj, "__next__"):
         return [safestr(i) for i in obj]
     else:
@@ -438,13 +376,6 @@ def timelimit(timeout):
     A decorator to limit a function to `timeout` seconds, raising `TimeoutError`
     if it takes longer.
 
-    Args:
-        timeout (float): Timeout in seconds.
-
-    Returns:
-        function: Decorator function that limits execution time.
-
-    Examples:
         >>> import time
         >>> def meaningoflife():
         ...     time.sleep(.2)
@@ -462,6 +393,7 @@ def timelimit(timeout):
 
     inspired by <http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/473878>
     """
+
     def _1(function):
         def _2(*args, **kw):
             class Dispatch(threading.Thread):
@@ -498,12 +430,6 @@ class Memoize:
     If `expires` is specified, values are recalculated after `expires` seconds.
     If `background` is specified, values are recalculated in a separate thread.
 
-    Args:
-        func: Function to memoize.
-        expires (float): Expiration time in seconds.
-        background (bool): Whether to update in background.
-
-    Examples:
         >>> calls = 0
         >>> def howmanytimeshaveibeencalled():
         ...     global calls
@@ -602,15 +528,6 @@ def re_subm(pat, repl, string):
     """
     Like re.sub, but returns the replacement _and_ the match object.
 
-    Args:
-        pat (str): Pattern to search for.
-        repl (str): Replacement string.
-        string (str): String to perform substitution on.
-
-    Returns:
-        tuple: A tuple of (replaced_string, match_object).
-
-    Examples:
         >>> t, m = re_subm('g(oo+)fball', r'f\\1lish', 'goooooofball')
         >>> t
         'foooooolish'
@@ -627,14 +544,6 @@ def group(seq, size):
     """
     Returns an iterator over a series of lists of length size from iterable.
 
-    Args:
-        seq: Iterable sequence.
-        size (int): Size of each group.
-
-    Returns:
-        iterator: Iterator over groups of the specified size.
-
-    Examples:
         >>> list(group([1,2,3,4], 2))
         [[1, 2], [3, 4]]
         >>> list(group([1,2,3,4,5], 2))
@@ -647,14 +556,6 @@ def uniq(seq, key=None):
     """
     Removes duplicate elements from a list while preserving the order of the rest.
 
-    Args:
-        seq: Sequence to remove duplicates from.
-        key (function): Optional function to extract comparison key from each element.
-
-    Returns:
-        list: List with duplicates removed.
-
-    Examples:
         >>> uniq([9,0,2,1,0])
         [9, 0, 2, 1]
 
@@ -680,12 +581,6 @@ def iterview(x):
     """
     Takes an iterable `x` and returns an iterator over it
     which prints its progress to stderr as it iterates through.
-
-    Args:
-        x: Iterable to iterate over.
-
-    Returns:
-        iterator: Iterator that shows progress.
     """
     WIDTH = 70
 
@@ -738,10 +633,6 @@ class IterBetter:
     cannot go backwards -- that is, you cannot request
     `iterbetter[0]` after requesting `iterbetter[1]`).
 
-    Args:
-        iterator: Iterator to wrap.
-
-    Examples:
         >>> import itertools
         >>> c = iterbetter(itertools.count())
         >>> c[1]
@@ -780,18 +671,11 @@ class IterBetter:
         self.i, self.c = iterator, 0
 
     def first(self, default=None):
-        """
-        Returns the first element of the iterator or None when there are no
+        """Returns the first element of the iterator or None when there are no
         elements.
 
         If the optional argument default is specified, that is returned instead
         of None when there are no elements.
-
-        Args:
-            default: Default value to return if iterator is empty.
-
-        Returns:
-            First element of the iterator or default value.
         """
         try:
             return next(iter(self))
@@ -843,17 +727,8 @@ iterbetter = IterBetter
 
 
 def safeiter(it, cleanup=None, ignore_errors=True):
-    """
-    Makes an iterator safe by ignoring the exceptions occurred during the iteration.
+    """Makes an iterator safe by ignoring the exceptions occurred during the iteration."""
 
-    Args:
-        it: Iterator to make safe.
-        cleanup: Cleanup function to call on exception.
-        ignore_errors (bool): Whether to ignore errors.
-
-    Returns:
-        iterator: Safe iterator that handles exceptions.
-    """
     def next():
         while True:
             try:
@@ -869,16 +744,8 @@ def safeiter(it, cleanup=None, ignore_errors=True):
 
 
 def safewrite(filename, content):
-    """
-    Writes the content to a temp file and then moves the temp file to
+    """Writes the content to a temp file and then moves the temp file to
     given filename to avoid overwriting the existing file in case of errors.
-
-    Args:
-        filename (str): Target filename.
-        content (str): Content to write.
-
-    Returns:
-        None
     """
     with open(filename + ".tmp", "w") as f:
         f.write(content)
@@ -889,13 +756,6 @@ def dictreverse(mapping):
     """
     Returns a new dictionary with keys and values swapped.
 
-    Args:
-        mapping (dict): Dictionary to reverse.
-
-    Returns:
-        dict: New dictionary with keys and values swapped.
-
-    Examples:
         >>> dictreverse({1: 2, 3: 4})
         {2: 1, 4: 3}
     """
@@ -907,14 +767,6 @@ def dictfind(dictionary, element):
     Returns a key whose value in `dictionary` is `element`
     or, if none exists, None.
 
-    Args:
-        dictionary (dict): Dictionary to search.
-        element: Element to find.
-
-    Returns:
-        Key whose value matches the element, or None.
-
-    Examples:
         >>> d = {1:2, 3:4}
         >>> dictfind(d, 4)
         3
@@ -930,14 +782,6 @@ def dictfindall(dictionary, element):
     Returns the keys whose values in `dictionary` are `element`
     or, if none exists, [].
 
-    Args:
-        dictionary (dict): Dictionary to search.
-        element: Element to find.
-
-    Returns:
-        list: List of keys whose values match the element.
-
-    Examples:
         >>> d = {1:4, 3:4}
         >>> dictfindall(d, 4)
         [1, 3]
@@ -956,14 +800,6 @@ def dictincr(dictionary, element):
     Increments `element` in `dictionary`,
     setting it to one if it doesn't exist.
 
-    Args:
-        dictionary (dict): Dictionary to increment.
-        element: Element to increment.
-
-    Returns:
-        int: New value of the element.
-
-    Examples:
         >>> d = {1:2, 3:4}
         >>> dictincr(d, 1)
         3
@@ -984,13 +820,6 @@ def dictadd(*dicts):
     Returns a dictionary consisting of the keys in the argument dictionaries.
     If they share a key, the value from the last argument is used.
 
-    Args:
-        *dicts: Dictionaries to merge.
-
-    Returns:
-        dict: Merged dictionary.
-
-    Examples:
         >>> dictadd({1: 0, 2: 0}, {2: 1, 3: 1})
         {1: 0, 2: 1, 3: 1}
     """
@@ -1001,22 +830,13 @@ def dictadd(*dicts):
 
 
 def requeue(queue, index=-1):
-    """
-    Returns the element at index after moving it to the beginning of the queue.
+    """Returns the element at index after moving it to the beginning of the queue.
 
-    Args:
-        queue (list): Queue to modify.
-        index (int): Index of element to move.
-
-    Returns:
-        Element that was moved.
-
-    Examples:
-        >>> x = [1, 2, 3, 4]
-        >>> requeue(x)
-        4
-        >>> x
-        [4, 1, 2, 3]
+    >>> x = [1, 2, 3, 4]
+    >>> requeue(x)
+    4
+    >>> x
+    [4, 1, 2, 3]
     """
     x = queue.pop(index)
     queue.insert(0, x)
@@ -1024,22 +844,13 @@ def requeue(queue, index=-1):
 
 
 def restack(stack, index=0):
-    """
-    Returns the element at index after moving it to the top of stack.
+    """Returns the element at index after moving it to the top of stack.
 
-    Args:
-        stack (list): Stack to modify.
-        index (int): Index of element to move.
-
-    Returns:
-        Element that was moved.
-
-    Examples:
-        >>> x = [1, 2, 3, 4]
-        >>> restack(x)
-        1
-        >>> x
-        [2, 3, 4, 1]
+    >>> x = [1, 2, 3, 4]
+    >>> restack(x)
+    1
+    >>> x
+    [2, 3, 4, 1]
     """
     x = stack.pop(index)
     stack.append(x)
@@ -1050,15 +861,6 @@ def listget(lst, ind, default=None):
     """
     Returns `lst[ind]` if it exists, `default` otherwise.
 
-    Args:
-        lst (list): List to get element from.
-        ind (int): Index of element to get.
-        default: Default value to return if index doesn't exist.
-
-    Returns:
-        Element at index or default value.
-
-    Examples:
         >>> listget(['a'], 0)
         'a'
         >>> listget(['a'], 1)
@@ -1074,14 +876,6 @@ def intget(integer, default=None):
     """
     Returns `integer` as an int or `default` if it can't.
 
-    Args:
-        integer: Value to convert to int.
-        default: Default value to return if conversion fails.
-
-    Returns:
-        int: Converted integer or default value.
-
-    Examples:
         >>> intget('3')
         3
         >>> intget('3a')
@@ -1098,14 +892,6 @@ def datestr(then, now=None):
     """
     Converts a (UTC) datetime object to a nice string representation.
 
-    Args:
-        then: Datetime object to convert.
-        now: Current datetime object (defaults to current UTC time).
-
-    Returns:
-        str: Formatted date string.
-
-    Examples:
         >>> from datetime import datetime, timedelta
         >>> d = datetime(1970, 5, 1)
         >>> datestr(d, now=d)
@@ -1131,6 +917,7 @@ def datestr(then, now=None):
         >>> datestr(None)
         ''
     """
+
     def agohence(n, what, divisor=None):
         if divisor:
             n = n // divisor
@@ -1202,17 +989,11 @@ def numify(string):
     """
     Removes all non-digit characters from `string`.
 
-    Args:
-        string (str): String to process.
-
-    Returns:
-        str: String with only digits.
-
-    Examples:
         >>> numify('800-555-1212')
         '8005551212'
         >>> numify('800.555.1212')
         '8005551212'
+
     """
     return "".join([c for c in str(string) if c.isdigit()])
 
@@ -1222,16 +1003,9 @@ def denumify(string, pattern):
     Formats `string` according to `pattern`, where the letter X gets replaced
     by characters from `string`.
 
-    Args:
-        string (str): String to format.
-        pattern (str): Pattern with X characters to replace.
-
-    Returns:
-        str: Formatted string.
-
-    Examples:
         >>> denumify("8005551212", "(XXX) XXX-XXXX")
         '(800) 555-1212'
+
     """
     out = []
     for c in pattern:
@@ -1247,13 +1021,6 @@ def commify(n):
     """
     Add commas to an integer `n`.
 
-    Args:
-        n: Number to format.
-
-    Returns:
-        str: Formatted number with commas.
-
-    Examples:
         >>> commify(1)
         '1'
         >>> commify(123)
@@ -1274,6 +1041,7 @@ def commify(n):
         '-1,234.50'
         >>> commify(None)
         >>>
+
     """
     if n is None:
         return None
@@ -1305,12 +1073,6 @@ def commify(n):
 def dateify(datestring):
     """
     Formats a numified `datestring` properly.
-
-    Args:
-        datestring (str): Date string to format.
-
-    Returns:
-        str: Formatted date string.
     """
     return denumify(datestring, "XXXX-XX-XX XX:XX:XX")
 
@@ -1320,13 +1082,6 @@ def nthstr(n):
     Formats an ordinal.
     Doesn't handle negative numbers.
 
-    Args:
-        n (int): Number to convert to ordinal.
-
-    Returns:
-        str: Ordinal string representation.
-
-    Examples:
         >>> nthstr(1)
         '1st'
         >>> nthstr(0)
@@ -1337,7 +1092,9 @@ def nthstr(n):
         ['91st', '92nd', '93rd', '94th', '99th', '100th', '101st', '102nd']
         >>> [nthstr(x) for x in [111, 112, 113, 114, 115]]
         ['111th', '112th', '113th', '114th', '115th']
+
     """
+
     assert n >= 0
     if n % 100 in [11, 12, 13]:
         return "%sth" % n
@@ -1348,15 +1105,6 @@ def cond(predicate, consequence, alternative=None):
     """
     Function replacement for if-else to use in expressions.
 
-    Args:
-        predicate (bool): Condition to evaluate.
-        consequence: Value to return if predicate is True.
-        alternative: Value to return if predicate is False.
-
-    Returns:
-        The consequence or alternative value based on the predicate.
-
-    Examples:
         >>> x = 2
         >>> cond(x % 2 == 0, "even", "odd")
         'even'
@@ -1373,10 +1121,6 @@ class CaptureStdout:
     """
     Captures everything `func` prints to stdout and returns it instead.
 
-    Args:
-        func: Function to capture output from.
-
-    Examples:
         >>> def idiot():
         ...     print("foo")
         >>> capturestdout(idiot)()
@@ -1407,10 +1151,6 @@ class Profile:
     Profiles `func` and returns a tuple containing its output
     and a string with human-readable profiling information.
 
-    Args:
-        func: Function to profile.
-
-    Examples:
         >>> import time
         >>> out, inf = profile(time.sleep)(.001)
         >>> out
@@ -1464,11 +1204,6 @@ def tryall(context, prefix=None):
     `context` is a dictionary mapping names to values;
     the value will only be tried if it's callable.
 
-    Args:
-        context (dict): Dictionary with function names as keys and functions as values.
-        prefix (str): Optional prefix to filter function names.
-
-    Examples:
         >>> tryall(dict(j=lambda: True))
         j: True
         ----------------------------------------
@@ -1511,7 +1246,6 @@ class ThreadedDict(threadlocal):
     """
     Thread local storage.
 
-    Examples:
         >>> d = ThreadedDict()
         >>> d.x = 1
         >>> d.x
@@ -1538,9 +1272,7 @@ class ThreadedDict(threadlocal):
         return id(self)
 
     def clear_all():
-        """
-        Clears all ThreadedDict instances.
-        """
+        """Clears all ThreadedDict instances."""
         for t in list(ThreadedDict._instances):
             t.clear()
 
@@ -1620,11 +1352,6 @@ def autoassign(self, locals):
     """
     Automatically assigns local variables to `self`.
 
-    Args:
-        self: Object to assign attributes to.
-        locals (dict): Dictionary of local variables.
-
-    Examples:
         >>> self = storage()
         >>> autoassign(self, dict(a=1, b=2))
         >>> self.a
@@ -1646,16 +1373,6 @@ def to36(q):
     """
     Converts an integer to base 36 (a useful scheme for human-sayable IDs).
 
-    Args:
-        q (int): Integer to convert.
-
-    Returns:
-        str: Base 36 representation of the integer.
-
-    Raises:
-        ValueError: If q is negative.
-
-    Examples:
         >>> to36(35)
         'z'
         >>> to36(119292)
@@ -1700,17 +1417,6 @@ def sendmail(from_address, to_address, subject, message, headers=None, **kw):
     to that SMTP server. Otherwise it will look for
     `/usr/sbin/sendmail`, the typical location for the sendmail-style
     binary. To use sendmail from a different path, set `web.config.sendmail_path`.
-
-    Args:
-        from_address (str): Sender email address.
-        to_address (str or list): Recipient email address(es).
-        subject (str): Email subject.
-        message (str): Email message body.
-        headers (dict): Additional email headers.
-        **kw: Additional keyword arguments including cc, bcc, and attachments.
-
-    Returns:
-        None
     """
     attachments = kw.pop("attachments", [])
     mail = _EmailMessage(from_address, to_address, subject, message, headers, **kw)

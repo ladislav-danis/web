@@ -1,21 +1,11 @@
 """
-Pretty debug errors for web.py applications.
+pretty debug errors
+(part of web.py)
 
-This module provides enhanced error pages with detailed debugging information
-for developers. It includes functionality for displaying tracebacks, request
-information, and local variables in a user-friendly format.
-
-The error pages are based on Django's error page design and provide extensive
-debugging capabilities during development.
-
-Examples:
-    >>> from web.debugerror import debugerror
-    >>> # Set as internal error handler in web.py application
-    >>> web.config.debug = True
-    >>> app.internalerror = debugerror
-
-Attributes:
-    __all__: List of public functions available in this module.
+portions adapted from Django <djangoproject.com>
+Copyright (c) 2005, the Lawrence Journal-World
+Used under the modified BSD license:
+http://www.xfree86.org/3.3.6/COPYRIGHT2.html#5
 """
 
 __all__ = ["debugerror", "djangoerror", "emailerrors"]
@@ -33,13 +23,6 @@ from .utils import safestr, sendmail
 
 
 def update_globals_template(t, globals):
-    """
-    Update the global variables of a template.
-
-    Args:
-        t: The template object to update.
-        globals: Dictionary of global variables to add to the template.
-    """
     t.t.__globals__.update(globals)
 
 
@@ -255,29 +238,10 @@ djangoerror_r = None
 
 
 def djangoerror():
-    """
-    Generate a Django-style error page with detailed debugging information.
-
-    This function creates an HTML error page that displays:
-    - Exception type and value
-    - Full traceback with context lines
-    - Local variables for each frame
-    - Request information including headers, cookies, and environment
-
-    Returns:
-        str: HTML content of the error page.
-    """
     def _get_lines_from_file(filename, lineno, context_lines):
         """
         Returns context_lines before and after lineno from file.
-
-        Args:
-            filename (str): Path to the source file.
-            lineno (int): Line number to get context for.
-            context_lines (int): Number of lines of context to include.
-
-        Returns:
-            tuple: (pre_context_lineno, pre_context, context_line, post_context)
+        Returns (pre_context_lineno, pre_context, context_line, post_context).
         """
         try:
             source = open(filename).readlines()
@@ -361,10 +325,6 @@ def debugerror():
 
     (Based on the beautiful 500 page from [Django](http://djangoproject.com/),
     designed by [Wilson Miner](http://wilsonminer.com/).)
-
-    Returns:
-        web._InternalError: An internal error handler that displays detailed
-                           debugging information.
     """
     return web._InternalError(djangoerror())
 
@@ -377,14 +337,6 @@ def emailerrors(to_address, olderror, from_address=None):
 
     Emails contain a normal text traceback as well as an
     attachment containing the nice `debugerror` page.
-
-    Args:
-        to_address (str): Email address to send error reports to.
-        olderror: The previous internal error handler function.
-        from_address (str, optional): Email address to send from. Defaults to to_address.
-
-    Returns:
-        callable: A new error handler that emails errors and then calls the old handler.
     """
     from_address = from_address or to_address
 

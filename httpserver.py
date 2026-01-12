@@ -13,23 +13,10 @@ __all__ = ["runsimple"]
 
 def runbasic(func, server_address=("0.0.0.0", 8080)):
     """
-    Runs a simple HTTP server hosting WSGI app `func`. The directory `static/`
-    is hosted statically.
+      Runs a simple HTTP server hosting WSGI app `func`. The directory `static/`
+      is hosted statically.
 
-    Based on [WsgiServer][ws] from [Colin Stewart][cs].
-
-    Args:
-        func: WSGI application to run.
-        server_address: Tuple of (host, port) for the server.
-
-    Examples:
-        >>> def app(environ, start_response):
-        ...     status = '200 OK'
-        ...     headers = [('Content-type', 'text/plain')]
-        ...     start_response(status, headers)
-        ...     return [b'Hello World']
-        >>> runbasic(app)  # doctest: +ELLIPSIS
-        http://0.0.0.0:8080/
+      Based on [WsgiServer][ws] from [Colin Stewart][cs].
 
     [ws]: http://www.owlfish.com/software/wsgiutils/documentation/wsgi-server-api.html
     [cs]: http://www.owlfish.com/
@@ -155,21 +142,7 @@ def runsimple(func, server_address=("0.0.0.0", 8080)):
     Runs [CherryPy][cp] WSGI server hosting WSGI app `func`.
     The directory `static/` is hosted statically.
 
-    Args:
-        func: WSGI application to run.
-        server_address: Tuple of (host, port) for the server.
-
-    Examples:
-        >>> def app(environ, start_response):
-        ...     status = '200 OK'
-        ...     headers = [('Content-type', 'text/plain')]
-        ...     start_response(status, headers)
-        ...     return [b'Hello World']
-        >>> runsimple(app)  # doctest: +ELLIPSIS
-        http://0.0.0.0:8080/
-
     [cp]: http://www.cherrypy.org
-
     """
     global server
     func = StaticMiddleware(func)
@@ -193,27 +166,8 @@ def runsimple(func, server_address=("0.0.0.0", 8080)):
 
 
 def WSGIServer(server_address, wsgi_app):
-    """
-    Creates CherryPy WSGI server listening at `server_address` to serve `wsgi_app`.
+    """Creates CherryPy WSGI server listening at `server_address` to serve `wsgi_app`.
     This function can be overwritten to customize the webserver or use a different webserver.
-
-    Args:
-        server_address: Tuple of (host, port) for the server.
-        wsgi_app: WSGI application to serve.
-
-    Returns:
-        WSGI server instance.
-
-    Examples:
-        >>> def app(environ, start_response):
-        ...     status = '200 OK'
-        ...     headers = [('Content-type', 'text/plain')]
-        ...     start_response(status, headers)
-        ...     return [b'Hello World']
-        >>> server = WSGIServer(('localhost', 8081), app)
-        >>> isinstance(server, object)  # doctest: +ELLIPSIS
-        True
-
     """
     from cheroot import wsgi
 
@@ -225,32 +179,7 @@ def WSGIServer(server_address, wsgi_app):
 
 
 class StaticApp(SimpleHTTPRequestHandler):
-    """
-    WSGI application for serving static files.
-
-    Args:
-        environ: WSGI environment dictionary.
-        start_response: WSGI start_response callable.
-
-    Examples:
-        >>> import tempfile
-        >>> import os
-        >>> with tempfile.TemporaryDirectory() as tmpdir:
-        ...     test_file = os.path.join(tmpdir, 'test.txt')
-        ...     with open(test_file, 'w') as f:
-        ...         f.write('test content')
-        ...     environ = {
-        ...         'PATH_INFO': '/test.txt',
-        ...         'REMOTE_ADDR': '127.0.0.1',
-        ...         'REMOTE_PORT': '12345',
-        ...         'REQUEST_METHOD': 'GET'
-        ...     }
-        ...     def start_response(status, headers, exc_info=None):
-        ...         return None
-        ...     app = StaticApp(environ, start_response)
-        ...     list(app)  # doctest: +ELLIPSIS
-        [<class '...'>, ...]
-    """
+    """WSGI application for serving static files."""
 
     def __init__(self, environ, start_response):
         self.headers = []
@@ -312,39 +241,13 @@ class StaticApp(SimpleHTTPRequestHandler):
 
 
 class StaticMiddleware:
-    """
-    WSGI middleware for serving static files.
-
-    Args:
-        app: The WSGI application to wrap.
-        prefix: URL prefix for static files (default: "/static/").
-
-    Examples:
-        >>> def app(environ, start_response):
-        ...     status = '200 OK'
-        ...     headers = [('Content-type', 'text/plain')]
-        ...     start_response(status, headers)
-        ...     return [b'Hello World']
-        >>> middleware = StaticMiddleware(app)
-        >>> callable(middleware)  # doctest: +ELLIPSIS
-        True
-    """
+    """WSGI middleware for serving static files."""
 
     def __init__(self, app, prefix="/static/"):
         self.app = app
         self.prefix = prefix
 
     def __call__(self, environ, start_response):
-        """
-        Process the WSGI request.
-
-        Args:
-            environ: WSGI environment dictionary.
-            start_response: WSGI start_response callable.
-
-        Returns:
-            Iterable of response data.
-        """
         path = environ.get("PATH_INFO", "")
         path = self.normpath(path)
 
@@ -354,15 +257,6 @@ class StaticMiddleware:
             return self.app(environ, start_response)
 
     def normpath(self, path):
-        """
-        Normalize a path.
-
-        Args:
-            path: Path to normalize.
-
-        Returns:
-            Normalized path.
-        """
         path2 = posixpath.normpath(unquote(path))
         if path.endswith("/"):
             path2 += "/"
@@ -370,22 +264,7 @@ class StaticMiddleware:
 
 
 class LogMiddleware:
-    """
-    WSGI middleware for logging the status.
-
-    Args:
-        app: The WSGI application to wrap.
-
-    Examples:
-        >>> def app(environ, start_response):
-        ...     status = '200 OK'
-        ...     headers = [('Content-type', 'text/plain')]
-        ...     start_response(status, headers)
-        ...     return [b'Hello World']
-        >>> middleware = LogMiddleware(app)
-        >>> callable(middleware)  # doctest: +ELLIPSIS
-        True
-    """
+    """WSGI middleware for logging the status."""
 
     def __init__(self, app):
         self.app = app
@@ -403,16 +282,6 @@ class LogMiddleware:
         ).log_date_time_string
 
     def __call__(self, environ, start_response):
-        """
-        Process the WSGI request and log it.
-
-        Args:
-            environ: WSGI environment dictionary.
-            start_response: WSGI start_response callable.
-
-        Returns:
-            Iterable of response data.
-        """
         def xstart_response(status, response_headers, *args):
             out = start_response(status, response_headers, *args)
             self.log(status, environ)
@@ -421,13 +290,6 @@ class LogMiddleware:
         return self.app(environ, xstart_response)
 
     def log(self, status, environ):
-        """
-        Log the request status.
-
-        Args:
-            status: HTTP status code.
-            environ: WSGI environment dictionary.
-        """
         outfile = environ.get("wsgi.errors", web.debug)
         req = environ.get("PATH_INFO", "_")
         protocol = environ.get("ACTUAL_SERVER_PROTOCOL", "-")
