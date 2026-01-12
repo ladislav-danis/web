@@ -117,6 +117,21 @@ class Form:
                 self.note = v.msg
                 return False
         return True
+    def validates(self, source=None, _validate=True, **kw):
+        source = source or kw or web.input()
+        out = True
+        for i in self.inputs:
+            v = attrget(source, i.name)
+            if _validate:
+                if not i.validate(v):
+                    out = False
+            else:
+                i.set_value(v)
+        
+        if _validate:
+            out = out and self._validate(source)
+            self.valid = out
+        return out
 
     def fill(self, source=None, **kw):
         return self.validates(source, _validate=False, **kw)
