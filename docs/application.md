@@ -1,125 +1,244 @@
 # Web Application Documentation
 
-This document describes the web application framework implemented in `web/application.py`.
+This document describes the web.py framework's core application classes and utilities. The framework provides a simple yet powerful way to build web applications with clean URL routing and request handling.
 
 ## Overview
 
-The `application` class is the core component of the web.py framework that handles HTTP requests by delegating them based on URL patterns. It provides a flexible way to build web applications with clean URL routing and request processing.
+The `application` class is the foundation of the web.py framework, handling HTTP requests by routing them to appropriate handlers based on URL patterns. It supports features like auto-reloading during development, middleware processing, and integration with WSGI servers.
 
 ## Classes
 
 ### `application`
 
-The main application class that handles HTTP requests and routes them to appropriate handlers.
+The main application class responsible for routing requests and processing them through registered handlers and processors.
 
 #### Constructor
+
 ```python
 def __init__(self, mapping=(), fvars={}, autoreload=None)
 ```
 
 **Parameters:**
-- `mapping`: List of URL patterns and corresponding handlers
-- `fvars`: Dictionary of global variables available to the application
-- `autoreload`: Whether to enable auto-reloading during development
+- `mapping`: A list of URL patterns paired with handler classes or functions. For example: `("/hello", "hello")`.
+- `fvars`: A dictionary of global variables available to the application (typically `globals()`).
+- `autoreload`: Whether to enable automatic reloading of modules when changes are detected. Defaults to `web.config.debug` if not specified.
 
 #### Methods
 
 ##### `add_mapping(pattern, classname)`
+
 Adds a new URL pattern and handler to the application.
 
+**Example:**
+```python
+app.add_mapping("/about", "AboutHandler")
+```
+
 ##### `add_processor(processor)`
-Adds a processor to the application. Processors are functions that wrap request handling.
+
+Adds a processor function to the application. Processors wrap request handling and can modify behavior before or after the main handler.
+
+**Example:**
+```python
+def log_request(handler):
+    print("Request started")
+    return handler()
+
+app.add_processor(log_request)
+```
 
 ##### `request(localpart="/", method="GET", data=None, host="0.0.0.0:8080", headers=None, https=False, **kw)`
-Makes a request to this application for the specified path and method.
+
+Simulates a request to the application for testing purposes.
 
 **Parameters:**
-- `localpart`: The URL path to request
-- `method`: HTTP method (GET, POST, etc.)
-- `data`: Request data
-- `host`: Host address
-- `headers`: HTTP headers as a dictionary
-- `https`: Whether to use HTTPS
+- `localpart`: The full URL path (including query string), e.g., `/hello?name=world`.
+- `method`: HTTP method (GET, POST, etc.).
+- `data`: Request body data (for POST/PUT requests).
+- `host`: Host address for the request.
+- `headers`: Dictionary of HTTP headers.
+- `https`: Whether to simulate HTTPS.
+
+**Returns:** A `storage` object with `data`, `status`, and `headers`.
+
+**Example:**
+```python
+response = app.request("/hello", headers={"User-Agent": "Test Client"})
+assert response.data == b"Hello, world!"
+```
 
 ##### `handle()`
+
 Handles the current request by matching URL patterns and delegating to appropriate handlers.
 
 ##### `handle_with_processors()`
-Handles the request with all registered processors applied.
+
+Handles the request with all registered processors applied in order.
 
 ##### `wsgifunc(*middleware)`
-Returns a WSGI-compatible function for this application.
+
+Returns a WSGI-compatible function for this application. Accepts optional middleware functions to wrap the application.
+
+**Example:**
+```python
+wsgi_app = app.wsgifunc(middleware1, middleware2)
+```
 
 ##### `run(*middleware)`
-Starts handling HTTP requests using WSGI.
+
+Starts handling HTTP requests. If called in a CGI or FastCGI context, follows that protocol. When run from the command line, starts an HTTP server on port 8080 (or specified port).
+
+**Example:**
+```python
+if __name__ == "__main__":
+    app.run()
+```
 
 ##### `stop()`
+
 Stops the HTTP server started by `run()`.
 
 ##### `cgirun(*middleware)`
-Returns a CGI handler for Google App Engine.
+
+Returns a CGI handler suitable for Google App Engine deployments.
 
 ##### `gaerun(*middleware)`
-Returns a handler compatible with Google App Engine.
+
+Returns a handler compatible with Google App Engine (supports both Python 2.5 and 2.7).
 
 ##### `load(env)`
-Initializes ctx using env.
+
+Initializes the request context (`web.ctx`) using the WSGI environment dictionary.
 
 ##### `_delegate(f, fvars, args=[])`
-Delegates request handling to appropriate handlers based on the matched pattern.
+
+Internal method to delegate request handling to appropriate handlers based on matched patterns.
 
 ##### `_match(mapping, value)`
-Matches URL patterns against the request path.
+
+Internal method to match URL patterns against the request path.
 
 ##### `_delegate_sub_application(dir, app)`
-Handles requests to sub-applications.
+
+Handles requests to sub-applications by adjusting the context paths.
 
 ##### `get_parent_app()`
-Get the parent application from the context stack.
+
+Returns the parent application from the context stack.
 
 ##### `notfound()`
-Returns HTTPError with '404 not found' message.
+
+Returns a 404 Not Found HTTP error.
 
 ##### `internalerror()`
-Returns HTTPError with '500 internal error' message.
+
+Returns a 500 Internal Server Error HTTP error.
 
 ### `auto_application`
 
-An application that automatically constructs URL mappings using metaclass magic.
+A subclass of `application` that automatically registers classes inheriting from `app.page` as URL handlers based on their class names.
 
-#### Constructor
+**Example:**
 ```python
-def __init__(self)
+app = auto_application()
+
+class hello(app.page):
+    def GET(self):
+        return "Hello, world!"
+
+class foo(app.page):
+    path = "/foo/.*"
+    def GET(self):
+        return "Foo"
+
+# Requests to /hello and /foo/bar will be handled automatically.
 ```
-
-### `subdir_application`
-
-An application that delegates requests based on the directory path (alias for `application`).
 
 ### `subdomain_application`
 
-An application that delegates requests based on the host domain.
+Routes requests based on the host domain.
 
-#### Methods
+**Example:**
+```python
+mapping = (r"hello\.example\.com", app)
+app2 = subdomain_application(mapping)
 
-##### `handle()`
-Handles requests by matching against host patterns.
-
-##### `_match(mapping, value)`
-Matches host patterns against the request host.
+# Requests to hello.example.com will be handled by 'app'
+```
 
 ## Hooks
 
 ### `loadhook(h)`
-Converts a load hook into an application processor.
+
+Converts a load hook function into an application processor. The hook runs before request handling.
+
+**Example:**
+```python
+def log_start():
+    print("Request started")
+
+app.add_processor(loadhook(log_start))
+```
 
 ### `unloadhook(h)`
-Converts an unload hook into an application processor.
+
+Converts an unload hook function into an application processor. The hook runs after request handling.
+
+**Example:**
+```python
+def log_end():
+    print("Request ended")
+
+app.add_processor(unloadhook(log_end))
+```
 
 ## Utilities
 
 ### `autodelegate(prefix="")`
-Returns a method that automatically delegates to methods with a given prefix.
+
+Returns a method that delegates to methods with the specified prefix. Useful for automatically routing sub-paths.
+
+**Example:**
+```python
+class Prefs:
+    GET = autodelegate('GET_')
+    
+    def GET_password(self):
+        return "Password settings"
+        
+    def GET_privacy(self):
+        return "Privacy settings"
+
+# /prefs/password → GET_password()
+# /prefs/privacy → GET_privacy()
+```
 
 ### `Reloader`
-Checks for changes in loaded modules and reloads them when necessary.
+
+A class that checks for changes in loaded modules and reloads them when necessary. Used for auto-reloading during development.
+
+**Note:** Automatically enabled when `autoreload=True` in the application constructor.
+
+## Example Usage
+
+```python
+import web
+
+urls = (
+    "/hello", "hello",
+    "/(.*)", "notfound"
+)
+
+class hello:
+    def GET(self):
+        return "Hello, world!"
+
+class notfound:
+    def GET(self):
+        raise web.notfound()
+
+app = web.application(urls, globals())
+app.run()
+```
+
+This example creates a simple application with two routes: `/hello` and a catch-all for 404.

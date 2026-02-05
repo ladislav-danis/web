@@ -26,7 +26,8 @@ render.hello(name="cheetah")
 
 Rendering interface to Genshi templates.
 
-**Example for XML/HTML templates:**```python
+**Example for XML/HTML templates:**
+```python
 render = render_genshi(['templates/'])
 render.hello(name='genshi')
 ```
@@ -54,7 +55,7 @@ render.hello(name='jinja2')
 
 **Parameters:**
 
-*   `*a`: Arguments passed to `Environment`.
+*   `*a`: Arguments passed to `FileSystemLoader`.
 *   `extensions` (list, optional): List of Jinja2 extensions to use.
 *   `globals` (dict, optional): Global variables to make available in templates.
 
