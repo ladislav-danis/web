@@ -1,3 +1,4 @@
+
 # Web Database API Documentation
 
 This document describes the database API implemented in `web/db.py`, which provides a unified interface for working with different database backends.
@@ -83,27 +84,27 @@ def __init__(self, db_module, keywords)
 ```
 
 #### Methods
-- `_load_context(ctx)`: Loads the database connection into the context.
-- `_unload_context(ctx)`: Unloads the database connection from the context.
-- `_connect(keywords)`: Creates a new database connection.
-- `_connect_with_pooling(keywords)`: Creates a pooled database connection.
-- `_db_cursor()`: Returns a new database cursor.
-- `_db_execute(cur, sql_query)`: Executes a SQL query with the given cursor.
-- `_process_query(sql_query)`: Processes an SQLQuery object into query string and parameters.
-- `_where(where, vars)`: Converts where clause to SQLQuery.
-- `_where_dict(where)`: Converts dictionary to WHERE clause.
-- `query(sql_query, vars=None, processed=False, _test=False)`: Executes a SQL query.
-- `create_result_set(cursor)`: Creates a result set from a cursor.
-- `select(tables, vars=None, what="*", where=None, order=None, group=None, limit=None, offset=None, _test=False)`: Performs SELECT queries.
-- `where(table, what="*", order=None, group=None, limit=None, offset=None, _test=False, **kwargs)`: Selects rows with WHERE conditions from a table.
-- `sql_clauses(what, tables, where, group, order, limit, offset)`: Returns SQL clauses for SELECT queries.
-- `gen_clause(sql, val, vars)`: Generates a clause for SQL query building.
-- `insert(tablename, seqname=None, _test=False, **values)`: Inserts a row into a table.
-- `multiple_insert(tablename, values, seqname=None, _test=False)`: Inserts multiple rows into a table.
-- `update(tables, where, vars=None, _test=False, **values)`: Updates rows in a table.
-- `delete(table, where, using=None, vars=None, _test=False)`: Deletes rows from a table.
-- `_process_insert_query(query, tablename, seqname)`: Processes insert queries for specific databases.
-- `transaction()`: Starts a new transaction.
+- `_getctx(self)`: Returns the current database context.
+- `_load_context(self, ctx)`: Loads the database connection into the context.
+- `_connect(self, keywords)`: Creates a new database connection.
+- `_connect_with_pooling(self, keywords)`: Creates a pooled database connection.
+- `_db_cursor(self)`: Returns a new database cursor.
+- `_db_execute(self, cur, sql_query)`: Executes a SQL query with the given cursor.
+- `_process_query(self, sql_query)`: Processes an SQLQuery object into query string and parameters.
+- `_where(self, where, vars)`: Converts where clause to SQLQuery.
+- `_where_dict(self, where)`: Converts dictionary to WHERE clause.
+- `query(self, sql_query, vars=None, processed=False, _test=False)`: Executes a SQL query.
+- `create_result_set(self, cursor)`: Creates a result set from a cursor.
+- `select(self, tables, vars=None, what="*", where=None, order=None, group=None, limit=None, offset=None, _test=False)`: Performs SELECT queries.
+- `where(self, table, what="*", order=None, group=None, limit=None, offset=None, _test=False, **kwargs)`: Selects rows with WHERE conditions from a table.
+- `sql_clauses(self, what, tables, where, group, order, limit, offset)`: Returns SQL clauses for SELECT queries.
+- `gen_clause(self, sql, val, vars)`: Generates a clause for SQL query building.
+- `insert(self, tablename, seqname=None, _test=False, **values)`: Inserts a row into a table.
+- `multiple_insert(self, tablename, values, seqname=None, _test=False)`: Inserts multiple rows into a table.
+- `update(self, tables, where, vars=None, _test=False, **values)`: Updates rows in a table.
+- `delete(self, table, where, using=None, vars=None, _test=False)`: Deletes rows from a table.
+- `_process_insert_query(self, query, tablename, seqname)`: Processes insert queries for specific databases.
+- `transaction(self)`: Starts a new transaction.
 
 ### Database-Specific Classes
 

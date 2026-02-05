@@ -1,6 +1,6 @@
 # Web Browser Documentation
 
-This document describes the browser testing framework implemented in `web/browser.py`.
+This document describes the browser testing framework implemented in [`web/browser.py`](web/browser.py).
 
 ## Overview
 
@@ -26,11 +26,11 @@ def __init__(self)
 - `reset()`: Clears all cookies and history.
 - `build_opener()`: Builds an opener for making HTTP requests. Subclasses can override this method.
 - `do_request(req)`: Performs an HTTP request with the given Request object.
-- `open(url, data=None, headers={})`: Opens the specified URL with optional data and headers.
-- `show()`: Opens the current page in a real web browser by saving it to a temporary file.
+- `open(url, data=None, headers={})`: Opens the specified URL with optional data (string or bytes) and headers (dictionary).
+- `show()`: Saves the current page to 'page.html' in the current working directory and opens it in the default web browser.
 - `get_response()`: Returns a copy of the current response.
 - `get_soup()`: Returns a BeautifulSoup object of the current document.
-- `get_text(e=None)`: Returns content of element e or the current document as plain text.
+- `get_text(e=None)`: Returns the text content of element e or the current document as plain text, with HTML entities unquoted.
 - `_get_links()`: Returns all links in the current document.
 - `get_links(text=None, text_regex=None, url=None, url_regex=None, predicate=None)`: Returns filtered links based on criteria.
 - `follow_link(link=None, text=None, text_regex=None, url=None, url_regex=None, predicate=None)`: Follows a link by clicking it.
@@ -38,7 +38,7 @@ def __init__(self)
 - `_filter_links(links, text=None, text_regex=None, url=None, url_regex=None, predicate=None)`: Filters links based on criteria.
 - `get_forms()`: Returns all forms in the current document using ClientForm.
 - `select_form(name=None, predicate=None, index=0)`: Selects a form by name or predicate.
-- `submit(**kw)`: Submits the currently selected form.
+- `submit(**kw)`: Submits the currently selected form, passing any keyword arguments to the form's click method.
 - `__getitem__(key)`: Gets a form field value.
 - `__setitem__(key, value)`: Sets a form field value.
 
@@ -102,4 +102,16 @@ b.submit()
 # Check results
 assert b.path == '/'
 assert 'Welcome joe' in b.get_text()
-```
+
+# Find all links with 'example.com' in the URL
+links = b.get_links(url_regex=r'example\.com')
+for link in links:
+    print(link['href'])
+
+# Find a specific link by text
+link = b.find_link(text='Sign Up')
+if link:
+    b.follow_link(link=link)
+
+# Select the second form with name 'login'
+b.select_form(name='login', index=1)
