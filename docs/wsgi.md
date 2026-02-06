@@ -60,6 +60,8 @@ Internal function that determines if the application is running in development m
 - Returns False if running under CGI, FastCGI, mod_wsgi, or other deployment environments
 - Returns True otherwise (development mode)
 
+**Note:** Some embedded Python interpreters may not have `sys.argv`, so the function safely handles this case.
+
 ## Constants and Configuration
 
 ### `web.config.debug`
@@ -110,32 +112,7 @@ python app.py scgi 127.0.0.1:4000
 web.wsgi.runwsgi(app.wsgifunc())
 ```
 
-### FastCGI Deployment
-```bash
-# Run as FastCGI
-python app.py fcgi
-
-# Run as FastCGI with specific address
-python app.py fcgi 127.0.0.1:9000
-```
-
-### SCGI Deployment
-```bash
-# Run as SCGI
-python app.py scgi
-
-# Run as SCGI with specific address
-python app.py scgi 127.0.0.1:4000
-```
-
-### Heroku Deployment
-```python
-# On Heroku, the PORT environment variable is automatically used
-# No special arguments needed - just run normally
-web.wsgi.runwsgi(app.wsgifunc())
-```
-
-## Environment Variables
+## Usage Examples (Duplicate Content Removed)
 
 ### `SERVER_SOFTWARE`
 Set when running under CGI or web server environments.
