@@ -4,11 +4,14 @@ This document describes the Python 3 compatibility utilities in `web/py3helpers.
 
 ## Overview
 
-The py3helpers module contains utility functions that help maintain compatibility between Python 2 and Python 3 by providing consistent interfaces for dictionary iteration operations. These helpers are particularly useful when writing code that needs to run on both Python versions.
+The `py3helpers` module contains utility functions that help maintain compatibility between Python 2 and Python 3 by providing consistent interfaces for dictionary iteration operations. These helpers are particularly useful when writing code that needs to run on both Python versions.
+
+In Python 2, dictionary methods like `.keys()`, `.values()`, and `.items()` return lists, while in Python 3 they return iterators. These helpers ensure consistent iterator behavior across both versions.
 
 ## Functions
 
 ### `iterkeys(d)`
+
 Returns an iterator over the dictionary's keys.
 
 **Parameters:**
@@ -25,6 +28,7 @@ for key in iterkeys(d):
 ```
 
 ### `itervalues(d)`
+
 Returns an iterator over the dictionary's values.
 
 **Parameters:**
@@ -41,6 +45,7 @@ for value in itervalues(d):
 ```
 
 ### `iteritems(d)`
+
 Returns an iterator over the dictionary's key-value pairs.
 
 **Parameters:**
@@ -59,6 +64,7 @@ for key, value in iteritems(d):
 ## Usage Examples
 
 ### Cross-Version Dictionary Iteration
+
 ```python
 from web.py3helpers import iterkeys, itervalues, iteritems
 
@@ -76,15 +82,26 @@ for key, value in iteritems(data):
 ```
 
 ### Migration from Python 2 to 3
+
 ```python
 # Instead of:
-# for key in dict.keys():  # Python 2
-# for key in dict:         # Python 3
+# for key in dict.keys():  # Python 2 (returns list)
+# for key in dict:         # Python 3 (iterates over keys)
 
 # Use:
 from web.py3helpers import iterkeys
 for key in iterkeys(dict):
     pass
+```
+
+## Implementation Details
+
+The module uses simple lambda functions that wrap the standard dictionary methods:
+
+```python
+iterkeys = lambda d: iter(d.keys())
+itervalues = lambda d: iter(d.values())
+iteritems = lambda d: iter(d.items())
 ```
 
 ## Notes
@@ -93,6 +110,7 @@ for key in iterkeys(dict):
 - In Python 3, they return iterators (as opposed to lists) for memory efficiency
 - The module is primarily intended for internal use within web.py to maintain compatibility
 - These helpers are not needed in pure Python 3 code where standard dictionary methods can be used directly
+- In Python 3, `dict.keys()`, `dict.values()`, and `dict.items()` already return dictionary view objects (which are iterators), so the `iter()` wrapper is redundant but harmless
 
 ## Dependencies
 
