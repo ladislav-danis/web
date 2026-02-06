@@ -6,6 +6,18 @@ This document describes the web.py framework's core application classes and util
 
 The `application` class is the foundation of the web.py framework, handling HTTP requests by routing them to appropriate handlers based on URL patterns. It supports features like auto-reloading during development, middleware processing, and integration with WSGI servers.
 
+## Exports
+
+The `application` module exports the following:
+
+- [`application`](#application) - Main application class for routing requests
+- [`auto_application`](#auto_application) - Application with automatic URL registration
+- [`subdir_application`](#subdir_application) - Alias for [`application`](#application)
+- [`subdomain_application`](#subdomain_application) - Application routing by host domain
+- [`loadhook`](#loadhook) - Hook function called before request handling
+- [`unloadhook`](#unloadhook) - Hook function called after request handling
+- [`autodelegate`](#autodelegate) - Method for automatic delegation to prefixed methods
+
 ## Classes
 
 ### `application`
@@ -47,13 +59,23 @@ def log_request(handler):
 app.add_processor(log_request)
 ```
 
+##### `browser()`
+
+Returns an `AppBrowser` instance for testing the application.
+
+**Example:**
+```python
+browser = app.browser()
+browser.open("/hello")
+```
+
 ##### `request(localpart="/", method="GET", data=None, host="0.0.0.0:8080", headers=None, https=False, **kw)`
 
 Simulates a request to the application for testing purposes.
 
 **Parameters:**
 - `localpart`: The full URL path (including query string), e.g., `/hello?name=world`.
-- `method`: HTTP method (GET, POST, etc.).
+- `method`: HTTP method (GET, POST, etc).
 - `data`: Request body data (for POST/PUT requests).
 - `host`: Host address for the request.
 - `headers`: Dictionary of HTTP headers.
@@ -153,6 +175,10 @@ class foo(app.page):
 
 # Requests to /hello and /foo/bar will be handled automatically.
 ```
+
+### `subdir_application`
+
+Alias for [`application`](#application). Provides the same functionality for handling subdirectory-based applications.
 
 ### `subdomain_application`
 
