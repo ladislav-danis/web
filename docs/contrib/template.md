@@ -76,7 +76,7 @@ render.hello(name="mako")
 
 ### `cache`
 
-Cache for any rendering interface.
+Cache wrapper for any rendering interface.
 
 **Example:**
 ```python
@@ -91,8 +91,8 @@ render.hello(name='cache')
 ## Usage Notes
 
 1.  Each renderer class expects templates to be stored with a `.html` extension by default.
-2.  Template names are mapped directly to method calls on the renderer object.
-3.  The `cache` wrapper can improve performance for frequently used templates.
+2.  Template names are mapped directly to method calls on the renderer object (e.g., `render.template_name()` loads `template_name.html`).
+3.  The `cache` wrapper can improve performance for frequently used templates by caching loaded template functions.
 4.  All rendering functions accept keyword arguments that become template variables.
 5.  The module will raise `ImportError` if the required templating engine is not installed.
 
