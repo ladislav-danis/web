@@ -42,27 +42,6 @@ Creates an error handler that emails error details to a specified address while 
 
 **Returns:** A new error handler function that emails errors and returns the original error
 
-## Classes
-
-### `SQLParam`
-Represents a parameter in SQL queries.
-
-#### Methods
-- `get_marker(paramstyle)`: Returns the appropriate parameter marker for the given style
-- `sqlquery()`: Returns an SQLQuery object containing this parameter
-- `__add__()`, `__radd__()`: Support for string concatenation with SQL queries
-- `__str__()`, `__eq__()`, `__repr__()`: Standard Python object methods
-
-### `SQLQuery`
-Represents a SQL query that can be built incrementally.
-
-#### Methods
-- `append(value)`: Appends a value to the query items
-- `__add__()`, `__radd__()`, `__iadd__()`: Support for query concatenation
-- `__len__()`, `__eq__()`: Standard Python object methods
-- `query(paramstyle=None)`: Returns the SQL query string with parameter markers
-- `values()`: Returns the list of parameter values
-- `join(items, sep=" ", prefix=None, suffix=None, target=None)`: Joins multiple queries
 
 ## Constants
 
