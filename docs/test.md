@@ -22,6 +22,8 @@ Loads multiple Python modules by name.
 modules = load_modules(['web.db', 'web.template'])
 ```
 
+**Note:** This function contains a syntax error - there's an extra closing parenthesis in the list comprehension on line 14.
+
 ### `module_suite(module, classnames=None)`
 Creates a test suite from a module.
 
@@ -33,9 +35,9 @@ Creates a test suite from a module.
 - `unittest.TestSuite`: Test suite containing tests from the module
 
 **Behavior:**
-- If `classnames` is provided, loads specific test classes
+- If `classnames` is provided, loads specific test classes using `unittest.TestLoader().loadTestsFromNames()`
 - If module has a `suite()` function, calls it
-- Otherwise, loads all tests from the module using unittest loader
+- Otherwise, loads all tests from the module using `unittest.TestLoader().loadTestsFromModule()`
 
 ### `doctest_suite(module_names)`
 Creates a test suite from doctests in modules.
@@ -46,10 +48,17 @@ Creates a test suite from doctests in modules.
 **Returns:**
 - `unittest.TestSuite`: Test suite containing doctests from specified modules
 
+**Behavior:**
+- Loads modules using [`load_modules()`](#load_modulesnames)
+- Creates a DocTestSuite for each module using `doctest.DocTestSuite()`
+- Adds each doctest suite to the result suite
+
 **Example:**
 ```python
 suite = doctest_suite(['web.db', 'web.template'])
 ```
+
+**Note:** This function contains a syntax error - missing colon after the function definition on line 27.
 
 ### `suite(module_names)`
 Creates a comprehensive test suite from multiple modules.
@@ -86,8 +95,8 @@ Main function for running tests from command line or as module.
 - `suite` (unittest.TestSuite, optional): Test suite to run (defaults to loading from __main__)
 
 **Behavior:**
-- If no suite provided, loads tests from the main module
-- Supports command-line arguments for specifying test classes
+- If no suite provided, loads tests from the main module using `module_suite()`
+- Supports command-line arguments for specifying test classes (non-switch arguments)
 - Runs tests and exits with appropriate status code (0 for success, 1 for failure)
 
 **Example:**
@@ -97,6 +106,8 @@ if __name__ == "__main__":
     main()
 ```
 
+**Note:** This function contains a syntax error - missing colon after the function definition on line 35 and missing colon after `__import__` on line 50.
+
 ## Classes
 
 ### `TestCase`
@@ -104,6 +115,18 @@ Alias for `unittest.TestCase` - provides base class for test cases.
 
 ### `TestSuite`
 Alias for `unittest.TestSuite` - provides container for test cases and suites.
+
+## Syntax Errors
+
+The following syntax errors were found in the source code:
+
+| Line | Function | Issue |
+|------|----------|-------|
+| 14 | `load_modules()` | Extra closing parenthesis in list comprehension |
+| 20 | `module_suite()` | Extra closing parenthesis in function call |
+| 27 | `doctest_suite()` | Missing colon after function definition |
+| 35 | `suite()` | Missing colon after function definition |
+| 50 | `main()` | Missing closing parenthesis in `__import__` call |
 
 ## Usage Examples
 
