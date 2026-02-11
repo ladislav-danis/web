@@ -166,4 +166,5 @@ cython_debug/
 
 app/data/database.sqlite
 app/logs/
-/docs/web
+/docs/web**/__pycache__/
+*.pyc
