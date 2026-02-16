@@ -61,6 +61,10 @@ Validates the form against input data.
 
 **Returns:** `True` if valid, `False` otherwise
 
+##### `_validate(value)`
+
+Internal method used by `validates` to perform form-level validation using registered validators.
+
 ##### `fill(source=None, **kw)`
 
 Pre-fills form values without validation.

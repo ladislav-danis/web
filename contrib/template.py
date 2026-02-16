@@ -4,7 +4,7 @@ Interface to various templating engines.
 
 import os.path
 
-__all__ = ["render_cheetah", "render_genshi", "render_mako", "cache"]
+__all__ = ["render_cheetah", "render_genshi", "render_jinja", "render_mako", "cache"]
 
 
 class render_cheetah:

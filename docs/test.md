@@ -22,8 +22,6 @@ Loads multiple Python modules by name.
 modules = load_modules(['web.db', 'web.template'])
 ```
 
-**Note:** This function contains a syntax error - there's an extra closing parenthesis in the list comprehension on line 14.
-
 ### `module_suite(module, classnames=None)`
 Creates a test suite from a module.
 
@@ -57,8 +55,6 @@ Creates a test suite from doctests in modules.
 ```python
 suite = doctest_suite(['web.db', 'web.template'])
 ```
-
-**Note:** This function contains a syntax error - missing colon after the function definition on line 27.
 
 ### `suite(module_names)`
 Creates a comprehensive test suite from multiple modules.
@@ -106,8 +102,6 @@ if __name__ == "__main__":
     main()
 ```
 
-**Note:** This function contains a syntax error - missing colon after the function definition on line 35 and missing colon after `__import__` on line 50.
-
 ## Classes
 
 ### `TestCase`
@@ -115,18 +109,6 @@ Alias for `unittest.TestCase` - provides base class for test cases.
 
 ### `TestSuite`
 Alias for `unittest.TestSuite` - provides container for test cases and suites.
-
-## Syntax Errors
-
-The following syntax errors were found in the source code:
-
-| Line | Function | Issue |
-|------|----------|-------|
-| 14 | `load_modules()` | Extra closing parenthesis in list comprehension |
-| 20 | `module_suite()` | Extra closing parenthesis in function call |
-| 27 | `doctest_suite()` | Missing colon after function definition |
-| 35 | `suite()` | Missing colon after function definition |
-| 50 | `main()` | Missing closing parenthesis in `__import__` call |
 
 ## Usage Examples
 

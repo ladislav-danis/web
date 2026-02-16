@@ -132,6 +132,18 @@ Returns a handler compatible with Google App Engine (supports both Python 2.5 an
 
 Initializes the request context (`web.ctx`) using the WSGI environment dictionary.
 
+##### `_load()`
+
+Internal method called by the `loadhook` to initialize the application on each request. It pushes the application onto the `web.ctx.app_stack`.
+
+##### `_unload()`
+
+Internal method called by the `unloadhook` to clean up after a request. It pops the application from the `web.ctx.app_stack` and restores the previous context if it was a sub-application.
+
+##### `_cleanup()`
+
+Internal method to clear thread-local state. It is called at the beginning and end of each request to ensure that thread-local data from one request does not interfere with subsequent requests.
+
 ##### `_delegate(f, fvars, args=[])`
 
 Internal method to delegate request handling to appropriate handlers based on matched patterns.
@@ -237,6 +249,19 @@ class Prefs:
 
 # /prefs/password → GET_password()
 # /prefs/privacy → GET_privacy()
+```
+
+### `with_metaclass(mcls)`
+
+A helper function to create a base class with a given metaclass, compatible with both Python 2 and Python 3.
+
+**Example:**
+```python
+class MyMeta(type):
+    pass
+
+class MyClass(with_metaclass(MyMeta)):
+    pass
 ```
 
 ### `Reloader`

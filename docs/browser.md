@@ -68,6 +68,10 @@ def __init__(self, app)
 ### `AppHandler`
 HTTP handler that processes requests using a web.py application.
 
+#### Attributes
+- `handler_order`: Set to `100` to prioritize this handler.
+- `https_request`: Alias for `HTTPHandler.do_request_` to support HTTPS.
+
 #### Constructor
 ```python
 def __init__(self, app)
@@ -218,6 +222,10 @@ AppBrowser(app)
 
 ### AppHandler
 HTTP handler that processes requests using a web.py application.
+
+#### Attributes
+- `handler_order`: Set to `100` to prioritize this handler.
+- `https_request`: Alias for `HTTPHandler.do_request_` to support HTTPS.
 
 #### Constructor
 ```python

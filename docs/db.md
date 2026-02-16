@@ -15,6 +15,9 @@ Exception raised when an unsupported database backend is specified.
 ### `TransactionError`
 Exception raised when database transaction operations fail.
 
+### `_ItplError`
+Internal exception raised by the SQL parser when it encounters an unfinished expression during interpolation.
+
 ### `UnknownParamstyle`
 Exception raised for unsupported database parameter styles (qmark, numeric, format, pyformat).
 
@@ -149,9 +152,11 @@ DB(db_module, keywords)
 #### Methods
 - `_getctx()`: Returns the current database context.
 - `_load_context(ctx)`: Loads the database connection into the context.
+- `_unload_context(ctx)`: Unloads the database connection from the context.
 - `_connect(keywords)`: Creates a new database connection.
 - `_connect_with_pooling(keywords)`: Creates a pooled database connection using DBUtils.
 - `_db_cursor()`: Returns a new database cursor.
+- `_param_marker()`: Returns the parameter marker used by the database driver.
 - `_db_execute(cur, sql_query)`: Executes a SQL query with the given cursor, handling errors and transactions.
 - `_process_query(sql_query)`: Processes an SQLQuery object into query string and parameters.
 - `_where(where, vars)`: Converts where clause to SQLQuery.
@@ -166,6 +171,7 @@ DB(db_module, keywords)
 - `multiple_insert(tablename, values, seqname=None, _test=False)`: Inserts multiple rows into a table.
 - `update(tables, where, vars=None, _test=False, **values)`: Updates rows in a table.
 - `delete(table, where, using=None, vars=None, _test=False)`: Deletes rows from a table.
+- `_get_insert_default_values_query(table)`: Returns the SQL query for inserting default values.
 - `_process_insert_query(query, tablename, seqname)`: Processes insert queries for specific databases.
 - `transaction()`: Starts a new transaction.
 
@@ -344,6 +350,12 @@ Interpolates a string with dictionary values to create an SQLQuery.
 >>> reparam("s IN $s", dict(s=[1, 2]))
 <sql: 's IN (1, 2)'>
 ```
+
+### `_sqllist(values)`
+Internal function to convert a list/tuple/set of values into a parenthesized SQL list (e.g., `(1, 2, 3)`). Used for `IN` clauses.
+
+### `_interpolate(format)`
+Internal function that takes a format string and returns chunks of (is_expression, text) for SQL interpolation.
 
 ### `sqlify(obj)`
 Converts Python objects to their SQL representation.
