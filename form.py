@@ -431,6 +431,7 @@ class Checkbox(Input):
         attrs["type"] = "checkbox"
         attrs["name"] = self.name
         attrs["value"] = self.value
+        attrs["id"] = self.id
 
         if self.checked:
             attrs["checked"] = "checked"
