@@ -411,6 +411,12 @@ class ApplicationTest(unittest.TestCase):
         self.assertEqual(f("/admin"), "foo=bar; Path=/admin/")
 
     def test_stopsimpleserver(self):
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(('', 0))
+        port = s.getsockname()[1]
+        s.close()
+
         urls = ("/", "index")
 
         class index:
@@ -418,7 +424,7 @@ class ApplicationTest(unittest.TestCase):
                 pass
 
         # reset command-line arguments
-        sys.argv = ["code.py"]
+        sys.argv = ["code.py", str(port)]
 
         app = web.application(urls, locals())
         thread = threading.Thread(target=app.run)
