@@ -6,8 +6,10 @@ Web API (wrapper around WSGI)
 import pprint
 import sys
 import urllib
+import datetime
 from http.cookies import CookieError, Morsel, SimpleCookie
 from urllib.parse import parse_qs, quote, unquote, urljoin
+from typing import Any, Dict, List, Optional, Union, Tuple, Iterable
 
 import multipart
 
@@ -81,7 +83,7 @@ A configuration object for various aspects of web.py.
 
 
 class HTTPError(Exception):
-    def __init__(self, status, headers={}, data=""):
+    def __init__(self, status: str, headers: Dict[str, str] = {}, data: Any = ""):
         ctx.status = status
         for k, v in headers.items():
             header(k, v)
@@ -382,7 +384,7 @@ def InternalError(message=None):
 internalerror = InternalError
 
 
-def header(hdr, value, unique=False):
+def header(hdr: str, value: str, unique: bool = False) -> None:
     """
     Adds the header `hdr: value` with the response.
 
@@ -453,7 +455,7 @@ def rawinput(method=None):
     )
 
 
-def input(*requireds, **defaults):
+def input(*requireds: str, **defaults: Any) -> storage:
     """
     Returns a `storage` object with the GET and POST arguments.
     See `storify` for how `requireds` and `defaults` work.
@@ -479,15 +481,15 @@ def data():
 
 
 def setcookie(
-    name,
-    value,
-    expires="",
-    domain=None,
-    secure=False,
-    httponly=False,
-    path=None,
-    samesite=None,
-):
+    name: str,
+    value: str,
+    expires: Union[str, int, datetime.datetime] = "",
+    domain: Optional[str] = None,
+    secure: bool = False,
+    httponly: bool = False,
+    path: Optional[str] = None,
+    samesite: Optional[str] = None,
+) -> None:
     """Sets a cookie."""
     morsel = Morsel()
     name, value = safestr(name), safestr(value)

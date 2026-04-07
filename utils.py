@@ -15,6 +15,7 @@ import time
 import traceback
 from io import StringIO
 from threading import local as threadlocal
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union, TypeVar, Type
 
 from .py3helpers import iteritems, itervalues
 
@@ -92,29 +93,29 @@ class Storage(dict):
 
     """
 
-    def __getattr__(self, key):
+    def __getattr__(self, key: str) -> Any:
         try:
             return self[key]
         except KeyError as k:
             raise AttributeError(k)
 
-    def __setattr__(self, key, value):
+    def __setattr__(self, key: str, value: Any) -> None:
         self[key] = value
 
-    def __delattr__(self, key):
+    def __delattr__(self, key: str) -> None:
         try:
             del self[key]
         except KeyError as k:
             raise AttributeError(k)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "<Storage " + dict.__repr__(self) + ">"
 
 
 storage = Storage
 
 
-def storify(mapping, *requireds, **defaults):
+def storify(mapping: Dict[str, Any], *requireds: str, **defaults: Any) -> Storage:
     """
     Creates a `storage` object from dictionary `mapping`, raising `KeyError` if
     d doesn't have all of the keys in `requireds` and using the default
@@ -872,7 +873,7 @@ def listget(lst, ind, default=None):
     return lst[ind]
 
 
-def intget(integer, default=None):
+def intget(integer: Any, default: Any = None) -> Any:
     """
     Returns `integer` as an int or `default` if it can't.
 

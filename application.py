@@ -12,6 +12,7 @@ from importlib import reload
 from inspect import isclass
 from io import BytesIO
 from urllib.parse import unquote, urlencode, urlparse
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Iterable, Type
 
 from . import browser, httpserver, utils, wsgi
 from . import webapi as web
@@ -45,7 +46,12 @@ class application:
 
     # PY3DOCTEST: b'hello'
 
-    def __init__(self, mapping=(), fvars={}, autoreload=None):
+    def __init__(
+        self,
+        mapping: Iterable[Union[str, "application", Any]] = (),
+        fvars: Dict[str, Any] = {},
+        autoreload: Optional[bool] = None,
+    ):
         if autoreload is None:
             autoreload = web.config.get("debug", False)
         self.init_mapping(mapping)
@@ -150,14 +156,14 @@ class application:
 
     def request(
         self,
-        localpart="/",
-        method="GET",
-        data=None,
-        host="0.0.0.0:8080",
-        headers=None,
-        https=False,
-        **kw,
-    ):
+        localpart: str = "/",
+        method: str = "GET",
+        data: Optional[Union[str, bytes, Dict[str, Any]]] = None,
+        host: str = "0.0.0.0:8080",
+        headers: Optional[Dict[str, str]] = None,
+        https: bool = False,
+        **kw: Any,
+    ) -> web.storage:
         """Makes request to this application for the specified path and method.
         Response will be a storage object with data, status and headers.
 
