@@ -39,6 +39,15 @@ def write(filename, data):
 
 
 class ApplicationTest(unittest.TestCase):
+    def tearDown(self):
+        for f in ["foo.py", "foo.pyc"]:
+            if os.path.exists(f):
+                os.remove(f)
+        if os.path.exists("__pycache__"):
+            shutil.rmtree("__pycache__", ignore_errors=True)
+        if os.path.exists("testpackage"):
+            shutil.rmtree("testpackage", ignore_errors=True)
+
     def test_reloader(self):
         write("foo.py", data % dict(classname="a", output="a"))
         import foo
