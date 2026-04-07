@@ -27,7 +27,12 @@ The main application class responsible for routing requests and processing them 
 #### Constructor
 
 ```python
-def __init__(self, mapping=(), fvars={}, autoreload=None)
+def __init__(
+    self,
+    mapping: Iterable[Union[str, "application", Any]] = (),
+    fvars: Dict[str, Any] = {},
+    autoreload: Optional[bool] = None,
+)
 ```
 
 **Parameters:**
@@ -69,7 +74,7 @@ browser = app.browser()
 browser.open("/hello")
 ```
 
-##### `request(localpart="/", method="GET", data=None, host="0.0.0.0:8080", headers=None, https=False, **kw)`
+##### `request(localpart: str = "/", method: str = "GET", data: Optional[Union[str, bytes, Dict[str, Any]]] = None, host: str = "0.0.0.0:8080", headers: Optional[Dict[str, str]] = None, https: bool = False, **kw: Any) -> web.storage`
 
 Simulates a request to the application for testing purposes.
 
