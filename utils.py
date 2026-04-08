@@ -1006,7 +1006,6 @@ def denumify(string, pattern):
 
         >>> denumify("8005551212", "(XXX) XXX-XXXX")
         '(800) 555-1212'
-
     """
     out = []
     for c in pattern:

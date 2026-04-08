@@ -373,36 +373,44 @@ class ShelfStore:
 
         import shelve
         store = ShelfStore(shelve.open('session.shelf'))
-
-    XXX: is shelve thread-safe?
     """
 
     def __init__(self, shelf):
         self.shelf = shelf
+        self.lock = threading.Lock()
 
     def __contains__(self, key):
-        return key in self.shelf
+        with self.lock:
+            return key in self.shelf
 
     def __getitem__(self, key):
-        atime, v = self.shelf[key]
-        self[key] = v  # update atime
-        return v
+        with self.lock:
+            atime, v = self.shelf[key]
+            self.shelf[key] = time.time(), v  # update atime
+            return v
 
     def __setitem__(self, key, value):
-        self.shelf[key] = time.time(), value
+        with self.lock:
+            self.shelf[key] = time.time(), value
 
     def __delitem__(self, key):
-        try:
-            del self.shelf[key]
-        except KeyError:
-            pass
+        with self.lock:
+            try:
+                del self.shelf[key]
+            except KeyError:
+                pass
 
     def cleanup(self, timeout):
         now = time.time()
-        for k in self.shelf:
-            atime, v = self.shelf[k]
-            if now - atime > timeout:
-                del self[k]
+        with self.lock:
+            # We must convert keys to a list to avoid "dictionary changed size during iteration"
+            for k in list(self.shelf.keys()):
+                atime, v = self.shelf[k]
+                if now - atime > timeout:
+                    try:
+                        del self.shelf[k]
+                    except KeyError:
+                        pass
 
 
 class MemoryStore(Store):
