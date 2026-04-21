@@ -1,5 +1,3 @@
-import threading
-import time
 import unittest
 from urllib.parse import unquote_to_bytes
 
@@ -16,17 +14,10 @@ class WSGITest(unittest.TestCase):
 
         app = web.application(urls, locals())
 
-        thread = threading.Thread(target=app.run)
-        thread.start()
-        time.sleep(0.5)
-
         b = web.browser.AppBrowser(app)
         r = b.open("/").read()
         s = r.decode("utf8")
         self.assertEqual(s, "\u0c05\u0c06")
-
-        app.stop()
-        thread.join()
 
     def test_layers_bytes(self):
         urls = ("/", "bytes")
@@ -37,16 +28,9 @@ class WSGITest(unittest.TestCase):
 
         app = web.application(urls, locals())
 
-        thread = threading.Thread(target=app.run)
-        thread.start()
-        time.sleep(0.5)
-
         b = web.browser.AppBrowser(app)
         r = b.open("/")
         self.assertEqual(r.read(), b"abcdef")
-
-        app.stop()
-        thread.join()
 
     def test_unicode_url(self):
         urls = ("/([^/]+)", "url_passthrough")
@@ -57,14 +41,7 @@ class WSGITest(unittest.TestCase):
 
         app = web.application(urls, locals())
 
-        thread = threading.Thread(target=app.run)
-        thread.start()
-        time.sleep(0.5)
-
         b = web.browser.AppBrowser(app)
         r = b.open("/%E2%84%A6")
         s = unquote_to_bytes(r.read())
         self.assertEqual(s, b"\xe2\x84\xa6")
-
-        app.stop()
-        thread.join()
