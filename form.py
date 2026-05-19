@@ -106,7 +106,7 @@ class Form:
                         self.note = i.note
             else:
                 i.set_value(v)
-        
+
         if _validate:
             out = out and self._validate(source)
             self.valid = out
