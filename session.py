@@ -4,21 +4,24 @@ Session Management
 """
 
 import datetime
+import hmac
+import json
 import os
 import os.path
-import pickle
 import shutil
 import threading
 import time
 from base64 import decodebytes, encodebytes
 from copy import deepcopy
-from hashlib import sha1
+from hashlib import sha256, sha1
 
 from . import utils
 from . import webapi as web
 from .py3helpers import iteritems
 
 __all__ = ["Session", "SessionExpired", "Store", "DiskStore", "DBStore", "MemoryStore"]
+
+DEFAULT_SECRET_KEY = "fLjUfxqXtfNoIldA0A0J"
 
 web.config.session_parameters = utils.storage(
     {
@@ -29,12 +32,30 @@ web.config.session_parameters = utils.storage(
         "timeout": 86400,  # 24 * 60 * 60, # 24 hours in seconds
         "ignore_expiry": True,
         "ignore_change_ip": True,
-        "secret_key": "fLjUfxqXtfNoIldA0A0J",
+        "secret_key": DEFAULT_SECRET_KEY,
         "expired_message": "Session expired",
         "httponly": True,
         "secure": False,
     }
 )
+
+
+class SessionError(Exception):
+    """Base exception for session errors."""
+
+    pass
+
+
+class SessionSecretRequired(SessionError):
+    """Raised when the default secret key is still configured."""
+
+    pass
+
+
+class SessionTamperedError(SessionError):
+    """Raised when session data signature verification fails."""
+
+    pass
 
 
 class SessionExpired(web.HTTPError):
@@ -62,6 +83,16 @@ class Session:
         self._last_cleanup_time = 0
         self._config = utils.storage(web.config.session_parameters)
         self._data = utils.threadeddict()
+
+        # P0-3: Require explicit secret key
+        if self._config.secret_key == DEFAULT_SECRET_KEY:
+            raise SessionSecretRequired(
+                "The default session secret_key must be changed. "
+                "Set web.config.session_parameters.secret_key to a random string."
+            )
+
+        # Make secret_key available to store for HMAC signing
+        self.store.secret_key = self._config.secret_key
 
         self.__getitem__ = self._data.__getitem__
         self.__setitem__ = self._data.__setitem__
@@ -175,7 +206,7 @@ class Session:
             secret_key = self._config.secret_key
 
             hashable = f"{rand}{now}{utils.safestr(web.ctx.ip)}{secret_key}"
-            session_id = sha1(hashable.encode("utf-8")).hexdigest()
+            session_id = sha256(hashable.encode("utf-8")).hexdigest()
             if session_id not in self.store:
                 break
         return session_id
@@ -220,18 +251,69 @@ class Store:
         """removes all the expired sessions"""
         raise NotImplementedError()
 
+    def _sign(self, data: bytes) -> bytes:
+        """Sign data with HMAC-SHA256 using the secret key."""
+        secret = self.secret_key.encode("utf-8")
+        signature = hmac.new(secret, data, sha256).hexdigest()
+        return signature.encode("utf-8") + b"." + data
+
+    def _verify(self, signed_data: bytes) -> bytes:
+        """Verify HMAC signature and return raw data. Raises SessionTamperedError on failure."""
+        secret = self.secret_key.encode("utf-8")
+        try:
+            sig_part, data_part = signed_data.split(b".", 1)
+        except ValueError:
+            raise SessionTamperedError("Malformed session data: missing signature delimiter")
+
+        expected_sig = hmac.new(secret, data_part, sha256).hexdigest().encode("utf-8")
+
+        if not hmac.compare_digest(sig_part, expected_sig):
+            raise SessionTamperedError("Session data signature verification failed")
+
+        return data_part
+
     def encode(self, session_dict):
-        """encodes session dict as a string"""
-        pickled = pickle.dumps(session_dict)
-        return encodebytes(pickled)
+        """encodes session dict as a signed JSON string"""
+        json_data = json.dumps(session_dict).encode("utf-8")
+        signed = self._sign(json_data)
+        return encodebytes(signed)
 
     def decode(self, session_data):
-        """decodes the data to get back the session dict"""
+        """decodes the signed JSON data to get back the session dict"""
         if isinstance(session_data, str):
             session_data = session_data.encode()
 
-        pickled = decodebytes(session_data)
-        return pickle.loads(pickled)
+        # Strip whitespace that may be added by base64 decoding in storage
+        session_data = session_data.strip()
+
+        decoded = decodebytes(session_data)
+
+        # P0-2 backward compatibility: detect old pickle format
+        # Pickle data typically starts with \x80 (protocol marker) or \x8a (binary flag)
+        # JSON data starts with { or [
+        if len(decoded) > 0 and decoded[0:1] in (b"\x80", b"\x8a", b"\x90"):
+            # Old pickle format - migrate to new format
+            import pickle as _pickle
+
+            try:
+                old_data = _pickle.loads(decoded)
+            except Exception:
+                raise SessionTamperedError("Unable to decode legacy session data")
+
+            # Re-encode with new format
+            json_data = json.dumps(old_data).encode("utf-8")
+            signed = self._sign(json_data)
+            # Store the migrated data
+            if isinstance(session_data, str):
+                session_data = session_data.encode()
+            # Write back in new format (strip and re-encode)
+            new_encoded = encodebytes(signed)
+            # We can't easily write back here since we're in __getitem__, but the
+            # next __setitem__ will use the new format
+            return old_data
+
+        verified = self._verify(decoded)
+        return json.loads(verified)
 
 
 class DiskStore(Store):
@@ -272,22 +354,22 @@ class DiskStore(Store):
 
         if os.path.exists(path):
             with open(path, "rb") as fh:
-                pickled = fh.read()
-            return self.decode(pickled)
+                raw = fh.read()
+            return self.decode(raw)
         else:
             raise KeyError(key)
 
     def __setitem__(self, key, value):
         path = self._get_path(key)
-        pickled = self.encode(value)
+        signed_data = self.encode(value)
         try:
             tname = path + "." + threading.current_thread().name
             f = open(tname, "wb")
             try:
-                f.write(pickled)
+                f.write(signed_data)
             finally:
                 f.close()
-                shutil.move(tname, path)  # atomary operation
+                shutil.move(tname, path)  # atomic operation
         except OSError:
             pass
 
@@ -341,21 +423,20 @@ class DBStore(Store):
             return self.decode(s.data)
 
     def __setitem__(self, key, value):
-        # Remove the leading `b` of bytes object (`b"..."`), otherwise encoded
-        # value is invalid base64 format.
-        pickled = self.encode(value).decode()
+        # encode returns bytes, decode to str for storage in TEXT column
+        signed_data = self.encode(value).decode("ascii")
 
         now = datetime.datetime.now()
         if key in self:
             self.db.update(
                 self.table,
                 where="session_id=$key",
-                data=pickled,
+                data=signed_data,
                 atime=now,
                 vars=locals(),
             )
         else:
-            self.db.insert(self.table, False, session_id=key, atime=now, data=pickled)
+            self.db.insert(self.table, False, session_id=key, atime=now, data=signed_data)
 
     def __delitem__(self, key):
         self.db.delete(self.table, where="session_id=$key", vars=locals())

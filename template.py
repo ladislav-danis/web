@@ -786,8 +786,7 @@ TEMPLATE_BUILTIN_NAMES = [
     "True",
     "False",
     "None",
-    "__import__",  # some c-libraries like datetime requires __import__ to present in the namespace
-]
+ ]
 
 TEMPLATE_BUILTINS = {
     name: getattr(builtins, name)

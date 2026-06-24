@@ -33,6 +33,11 @@ def convert_timestamp(time_stamp: bytes) -> datetime:
 sqlite3.register_adapter(datetime, adapt_datetime_iso)
 sqlite3.register_converter("timestamp", convert_timestamp)
 
+# Use a non-default secret key for tests
+web.config.session_parameters.secret_key = "test-secret-key-for-unit-tests-only"
+
+_TEST_SECRET_KEY = "test-secret-key-for-unit-tests-only"
+
 
 class SessionTest(unittest.TestCase):
     def setUp(self):
@@ -112,24 +117,31 @@ class SessionTest(unittest.TestCase):
 
 
 class DiskStoreTest(unittest.TestCase):
+    def setUp(self):
+        # Set secret_key on store instances used directly (not via Session)
+        self.dir = tempfile.mkdtemp()
+        self.store = web.session.DiskStore(self.dir)
+        self.store.secret_key = _TEST_SECRET_KEY
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
     def testRemovedSessionDir(self):
         # make sure `cleanup()` correctly returns when session directory was
         # removed.
-        dir = tempfile.mkdtemp()
-        s = web.session.DiskStore(dir)
-        s["count"] = 20
-        self.assertEqual(s["count"], 20)
-        shutil.rmtree(dir)
+        self.store["count"] = 20
+        self.assertEqual(self.store["count"], 20)
+        shutil.rmtree(self.dir)
         time.sleep(2)
-        s.cleanup(1)
+        self.store.cleanup(1)
 
     def testStoreConcurrent(self):
-        dir = tempfile.mkdtemp()
-        store = web.session.DiskStore(dir)
+        store = self.store
 
         def set_val():
             store["fail"] = "value"
 
+        value = None
         for c in range(10):
             m = threading.Thread(target=set_val)
             m.start()
@@ -138,6 +150,31 @@ class DiskStoreTest(unittest.TestCase):
             except KeyError:
                 pass
         self.assertEqual(value, "value")
+
+    def testEncodeDecode(self):
+        # Test that encode/decode works with JSON + HMAC
+        self.store["key"] = {"nested": {"data": [1, 2, 3]}}
+        self.assertEqual(self.store["key"], {"nested": {"data": [1, 2, 3]}})
+
+    def testTamperedData(self):
+        # Test that tampered session data is rejected
+        self.store["key"] = "value"
+        # Directly tamper with the stored file
+        path = os.path.join(self.dir, "key")
+        with open(path, "rb") as f:
+            encoded_data = f.read()
+        # Decode from base64, tamper with the JSON portion, re-encode
+        from base64 import decodebytes, encodebytes
+        decoded = decodebytes(encoded_data)
+        # Split at the signature delimiter and flip a byte in the JSON data
+        sig_part, json_part = decoded.split(b".", 1)
+        tampered_json = json_part[:1] + bytes([json_part[1] ^ 0xFF]) + json_part[2:]
+        tampered = sig_part + b"." + tampered_json
+        tampered_encoded = encodebytes(tampered)
+        with open(path, "wb") as f:
+            f.write(tampered_encoded)
+        with self.assertRaises(web.session.SessionTamperedError):
+            _ = self.store["key"]
 
 
 class DBSessionTest(SessionTest):

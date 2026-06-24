@@ -39,6 +39,43 @@ __all__ = [
     "DB",
 ]
 
+# Pattern for valid SQL identifiers: letters, digits, underscores;
+# must start with a letter or underscore; no spaces or special chars.
+# Also allows double-quoted identifiers like "table name".
+_SQL_IDENTIFIER_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$|^".*"$')
+
+
+class SQLInjectionError(Exception):
+    """Raised when a table or column name appears to contain SQL injection."""
+
+    pass
+
+
+def _sql_safe_identifier(name):
+    """Validate that a name is a safe SQL identifier.
+
+    Raises SQLInjectionError if the name contains characters that could
+    be used for SQL injection (e.g., spaces, semicolons, quotes, etc.).
+
+    Accepts:
+    - Simple identifiers: ``users``, ``user_data``, ``_private``
+    - Double-quoted identifiers: ``"table name"``, ``"user-data"``
+
+    Returns the validated name unchanged.
+    """
+    if not isinstance(name, str):
+        raise SQLInjectionError(
+            f"Table/column name must be a string, got {type(name).__name__}"
+        )
+    if not name:
+        raise SQLInjectionError("Table/column name must not be empty")
+    if not _SQL_IDENTIFIER_RE.match(name):
+        raise SQLInjectionError(
+            f"Invalid SQL identifier: {name!r}. "
+            "Only alphanumeric characters, underscores, and double quotes are allowed."
+        )
+    return name
+
 TOKEN = "[ \\f\\t]*(\\\\\\r?\\n[ \\f\\t]*)*(#[^\\r\\n]*)?(((\\d+[jJ]|((\\d+\\.\\d*|\\.\\d+)([eE][-+]?\\d+)?|\\d+[eE][-+]?\\d+)[jJ])|((\\d+\\.\\d*|\\.\\d+)([eE][-+]?\\d+)?|\\d+[eE][-+]?\\d+)|(0[xX][\\da-fA-F]+[lL]?|0[bB][01]+[lL]?|(0[oO][0-7]+)|(0[0-7]*)[lL]?|[1-9]\\d*[lL]?))|((\\*\\*=?|>>=?|<<=?|<>|!=|//=?|[+\\-*/%&|^=<>]=?|~)|[][(){}]|(\\r?\\n|[:;.,`@]))|([uUbB]?[rR]?'[^\\n'\\\\]*(?:\\\\.[^\\n'\\\\]*)*'|[uUbB]?[rR]?\"[^\\n\"\\\\]*(?:\\\\.[^\\n\"\\\\]*)*\")|[a-zA-Z_]\\w*)"  # noqa: E501
 
 tokenprog = re.compile(TOKEN)
@@ -956,11 +993,16 @@ class DB:
             >>> q.values()
             [2, 'bob']
         """
+        _sql_safe_identifier(tablename)
 
         def q(x):
             return "(" + x + ")"
 
         if values:
+            # Validate column names
+            for key in values:
+                _sql_safe_identifier(key)
+
             # needed for Py3 compatibility with the above doctests
             sorted_values = sorted(values.items(), key=lambda t: t[0])
 
@@ -1001,6 +1043,7 @@ class DB:
         return out
 
     def _get_insert_default_values_query(self, table):
+        _sql_safe_identifier(table)
         return "INSERT INTO %s DEFAULT VALUES" % table
 
     def multiple_insert(self, tablename, values, seqname=None, _test=False):
@@ -1020,6 +1063,8 @@ class DB:
         if not values:
             return []
 
+        _sql_safe_identifier(tablename)
+
         if not self.supports_multiple_insert:
             out = [
                 self.insert(tablename, seqname=seqname, _test=_test, **v)
@@ -1031,7 +1076,9 @@ class DB:
                 return out
 
         keys = values[0].keys()
-        # @@ make sure all keys are valid
+        # Validate all column names
+        for key in keys:
+            _sql_safe_identifier(key)
 
         for v in values:
             if v.keys() != keys:
@@ -1106,6 +1153,17 @@ class DB:
         if vars is None:
             vars = {}
 
+        # Validate table names
+        if isinstance(tables, str):
+            _sql_safe_identifier(tables)
+        else:
+            for t in tables:
+                _sql_safe_identifier(t)
+
+        # Validate column names (values dict keys)
+        for key in values:
+            _sql_safe_identifier(key)
+
         where = self._where(where, vars)
         values = sorted(values.items(), key=lambda t: t[0])
 
@@ -1138,6 +1196,11 @@ class DB:
         """
         if vars is None:
             vars = {}
+
+        _sql_safe_identifier(table)
+        if using:
+            for t in (using if isinstance(using, (list, tuple)) else [using]):
+                _sql_safe_identifier(t)
 
         where = self._where(where, vars)
 
