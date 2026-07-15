@@ -27,7 +27,13 @@ def convert_timestamp(time_stamp: bytes) -> datetime:
     >>> convert_timestamp(b'2023-04-05T06:07:08.000009')
     datetime.datetime(2023, 4, 5, 6, 7, 8, 9)
     """
-    return datetime.strptime(time_stamp.decode("utf-8"), "%Y-%m-%dT%H:%M:%S.%f")
+    text = time_stamp.decode("utf-8")
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"time data {text!r} does not match any known format")
 
 
 sqlite3.register_adapter(datetime, adapt_datetime_iso)
