@@ -171,7 +171,7 @@ def WSGIServer(server_address, wsgi_app):
     """
     from cheroot import wsgi
 
-    server = wsgi.Server(server_address, wsgi_app, server_name="localhost")
+    server = wsgi.Server(server_address, wsgi_app, server_name="localhost", reuse_port=True)
     server.nodelay = not sys.platform.startswith(
         "java"
     )  # TCP_NODELAY isn't supported on the JVM

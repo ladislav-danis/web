@@ -39,6 +39,8 @@ def write(filename, data):
 
 
 class ApplicationTest(unittest.TestCase):
+    _httpserver_lock = threading.Lock()
+
     def tearDown(self):
         for f in ["foo.py", "foo.pyc"]:
             if os.path.exists(f):
@@ -419,30 +421,43 @@ class ApplicationTest(unittest.TestCase):
         self.assertEqual(f(""), "foo=bar; Path=/")
         self.assertEqual(f("/admin"), "foo=bar; Path=/admin/")
 
-    @unittest.skip("Flaky in multi-threaded test environments with global httpserver state")
     def test_stopsimpleserver(self):
         import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(('', 0))
-        port = s.getsockname()[1]
-        s.close()
+        from web import httpserver
 
-        urls = ("/", "index")
+        with self._httpserver_lock:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            s.bind(('', 0))
+            port = s.getsockname()[1]
+            s.close()
 
-        class index:
-            def GET(self):
-                pass
+            # Save and restore global state to prevent test interference
+            saved_argv = sys.argv
+            saved_server = httpserver.server
 
-        # reset command-line arguments
-        sys.argv = ["code.py", str(port)]
+            try:
+                urls = ("/", "index")
 
-        app = web.application(urls, locals())
-        thread = threading.Thread(target=app.run)
+                class index:
+                    def GET(self):
+                        pass
 
-        thread.start()
-        time.sleep(1)
-        self.assertTrue(thread.is_alive())
+                # reset command-line arguments
+                sys.argv = ["code.py", str(port)]
 
-        app.stop()
-        thread.join(timeout=1)
-        self.assertFalse(thread.is_alive())
+                app = web.application(urls, locals())
+                thread = threading.Thread(target=app.run)
+
+                thread.start()
+                time.sleep(1)
+                self.assertTrue(thread.is_alive())
+
+                app.stop()
+                thread.join(timeout=1)
+                self.assertFalse(thread.is_alive())
+            finally:
+                # Restore global state
+                sys.argv = saved_argv
+                httpserver.server = saved_server
