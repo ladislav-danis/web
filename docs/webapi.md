@@ -483,6 +483,6 @@ The webapi module includes several security features:
 
 ## See Also
 
-- [`web.http`](docs/http.md) - HTTP utilities
-- [`web.wsgi`](docs/wsgi.md) - WSGI interface
-- [`web.utils`](docs/utils.md) - Utility functions
+- [`web.http`](http.md) - HTTP utilities
+- [`web.wsgi`](wsgi.md) - WSGI interface
+- [`web.utils`](utils.md) - Utility functions

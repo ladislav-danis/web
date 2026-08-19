@@ -10,17 +10,17 @@ The net module contains essential networking utilities used throughout the web.p
 
 The module exports the following functions via [`__all__`](#all):
 
-- [`validipaddr()`](#validipaddreaddress) - Validate IPv4 address
-- [`validip6addr()`](#validip6addreaddress) - Validate IPv6 address
-- [`validipport()`](#validipporteport) - Validate port number
-- [`validip()`](#validipeip-defaultaddr0000-defaultport8080) - Parse IP:port string
-- [`validaddr()`](#validaddrestring_) - Parse IP or Unix socket path
-- [`urlquote()`](#urlquoteval) - URL-encode a string
+- [`validipaddr()`](#validipaddr-address) - Validate IPv4 address
+- [`validip6addr()`](#validip6addr-address) - Validate IPv6 address
+- [`validipport()`](#validipport-port) - Validate port number
+- [`validip()`](#validip-ip-defaultaddr0000-defaultport8080) - Parse IP:port string
+- [`validaddr()`](#validaddr-string_) - Parse IP or Unix socket path
+- [`urlquote()`](#urlquote-val) - URL-encode a string
 - [`httpdate()`](#httpdate-date_obj) - Format datetime for HTTP headers
 - [`parsehttpdate()`](#parsehttpdate-string_) - Parse HTTP date string
-- [`htmlquote()`](#htmlquotetext) - HTML-encode text
-- [`htmlunquote()`](#htmlunquotetext) - HTML-decode text
-- [`websafe()`](#websafeval) - Make value safe for HTML
+- [`htmlquote()`](#htmlquote-text) - HTML-encode text
+- [`htmlunquote()`](#htmlunquote-text) - HTML-decode text
+- [`websafe()`](#websafe-val) - Make value safe for HTML
 
 ## Functions
 
