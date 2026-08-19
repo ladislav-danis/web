@@ -532,5 +532,5 @@ The cleanup process runs automatically on each request but only performs actual 
 
 ## See Also
 
-- [`webapi.py`](webapi.md): Web API module for cookie and context management
-- [`utils.py`](utils.md): Utility functions used by the session module
+- [`webapi.md`](webapi.md) - Web API module for cookie and context management
+- [`utils.md`](utils.md) - Utility functions used by the session module

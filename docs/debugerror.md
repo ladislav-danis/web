@@ -336,6 +336,6 @@ Ensure the template file path is correct and the file exists. The template is em
 
 ## See Also
 
-- [`web/api`](webapi.md) - Core web.py API
-- [`web/template`](template.md) - Template system documentation
-- [`web/utils`](utils.md) - Utility functions including `sendmail`
+- [`web.webapi`](webapi.md) - Core web.py API
+- [`web.template`](template.md) - Template system documentation
+- [`web.utils`](utils.md) - Utility functions including `sendmail`

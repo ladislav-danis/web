@@ -112,7 +112,7 @@ python app.py scgi 127.0.0.1:4000
 web.wsgi.runwsgi(app.wsgifunc())
 ```
 
-## Usage Examples (Duplicate Content Removed)
+## Environment Variables
 
 ### `SERVER_SOFTWARE`
 Set when running under CGI or web server environments.

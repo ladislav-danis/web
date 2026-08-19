@@ -541,3 +541,9 @@ The module exports the following names:
 - `register_database(name, clazz)`: Register new database class.
 - `dburl2dict(url)`: Parse database URL.
 - `sqlliteral(value)`: Create SQL literal.
+
+## See Also
+
+- [`session.md`](session.md) - Session management with database-backed storage (DBStore)
+- [`webapi.md`](webapi.md) - Web API including context and cookie management
+- [`utils.md`](utils.md) - Utility functions used by the database module
