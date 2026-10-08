@@ -127,11 +127,15 @@ Stops the HTTP server started by `run()`.
 
 ##### `cgirun(*middleware)`
 
-Returns a CGI handler suitable for Google App Engine deployments.
+Immediately executes a CGI runner; it does **not** return a WSGI callable for later use. It first builds `app.wsgifunc(*middleware)`, then tries the legacy `google.appengine.ext.webapp.util.run_wsgi_app` import and calls that runner with the wrapped application. If this raises `ImportError`, it falls back to `wsgiref.handlers.CGIHandler().run(wsgiapp)`. Its return value is the selected runner's result.
+
+This is a legacy execution path, not a claim of compatibility with current Google hosting. To obtain a WSGI callable without executing a runner, use [`app.wsgifunc(*middleware)`](#wsgifuncmiddleware) instead.
 
 ##### `gaerun(*middleware)`
 
-Returns a handler compatible with Google App Engine (supports both Python 2.5 and 2.7).
+Legacy entry point for the old Google App Engine Python 2.5/2.7 API. It is **unusable on this package's current Python 3 runtime**: after constructing the middleware-wrapped WSGI callable, it raises `OSError("Google App Engine only supports python 2.5 and 2.7")` without invoking a runner. That historical error describes this helper's obsolete API restriction, not the Python versions supported by modern Google platforms.
+
+Use [`app.wsgifunc(*middleware)`](#wsgifuncmiddleware) to obtain a WSGI callable, and configure an appropriate WSGI server separately. Neither this recommendation nor the legacy helpers certify a Google deployment.
 
 ##### `load(env)`
 
@@ -258,14 +262,17 @@ class Prefs:
 
 ### `with_metaclass(mcls)`
 
-A helper function to create a base class with a given metaclass, compatible with both Python 2 and Python 3.
+Returns a class decorator that recreates the decorated class using `mcls`, preserving its name, bases and class body (apart from the `__dict__` and `__weakref__` descriptors). It is not a base-class factory. Import it explicitly from `web.application`.
 
 **Example:**
 ```python
+from web.application import with_metaclass
+
 class MyMeta(type):
     pass
 
-class MyClass(with_metaclass(MyMeta)):
+@with_metaclass(MyMeta)
+class MyClass:
     pass
 ```
 
@@ -282,7 +289,7 @@ import web
 
 urls = (
     "/hello", "hello",
-    "/(.*)", "notfound"
+    "/.*", "notfound"
 )
 
 class hello:
@@ -297,4 +304,4 @@ app = web.application(urls, globals())
 app.run()
 ```
 
-This example creates a simple application with two routes: `/hello` and a catch-all for 404.
+This example creates a simple application with two routes: `/hello` and a catch-all for 404. The catch-all `/.*` has no capture group, matching `notfound.GET(self)`; a capturing pattern such as `/(.*)` would pass an extra path argument to the method.
