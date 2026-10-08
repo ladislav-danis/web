@@ -92,7 +92,10 @@ SQLLiteral(v)
 ```
 
 ### `BaseResultSet`
-Base class for result sets returned by database queries. Provides iteration and indexing support.
+Base class for result sets returned by database queries. A result set is a
+forward-only iterator, not a reusable sequence. Rows are storage objects with
+both mapping and attribute access. Every consuming operation shares the same
+position; none rewinds the cursor.
 
 #### Constructor
 ```python
@@ -100,25 +103,61 @@ BaseResultSet(cursor)
 ```
 
 #### Methods
-- `list()`: Returns all rows as a list.
+- `list()`: Consumes and returns all **remaining** rows as a list. A subsequent call returns `[]`.
 - `_prepare_row(row)`: Prepares a single row for return as a storage object.
-- `__iter__()`: Returns an iterator over rows.
-- `__next__()`: Returns the next row or raises StopIteration.
-- `first(default=None)`: Returns the first row or default if none exists.
-- `__getitem__(i)`: Access rows by index (note: accessing by index consumes the iterator).
+- `__iter__()`: Returns the result set itself.
+- `__next__()` / `next()`: Consumes the next row or raises `StopIteration` at the end. The compatibility method `result.next()` follows the same path as `next(result)`.
+- `first(default=None)`: Consumes the next remaining row, or returns `default` if exhausted. Repeated calls advance; “first” does not mean the original first row after earlier consumption.
+- `__getitem__(i)`: Consumes through the **absolute zero-based** position `i` in the original query result. For example, fresh `result[2]` discards positions 0 and 1 and returns position 2. The next read starts at position 3. Negative indices, already-consumed positions (including repeating the same index), and positions past the end raise `IndexError`. An out-of-range forward request consumes any intervening remaining rows before raising. Slices are not supported.
+
+The internal `_index` counts rows actually consumed, including rows skipped by
+forward indexing. Peeking, rejected backward indices and failed reads at the end
+do not increment it. For reusable/random access, explicitly save the remaining
+rows once with `rows = result.list()` and index that ordinary list instead.
 
 ### `ResultSet`
-Result set implementation for most database backends (PostgreSQL, MySQL).
+Result set implementation for most database backends (PostgreSQL, MySQL), with
+the same forward-only consumption methods.
 
 #### Methods
-- `__len__()`: Returns the number of rows in the result set (uses `rowcount`).
+- `__len__()`: Returns `int(cursor.rowcount)` from the driver. This is not a separately maintained count of remaining rows; availability and meaning depend on the driver. Truth testing uses this length, unlike the SQLite peek described below. A raw SQLite SELECT cursor reports `-1`, so wrapping it in `ResultSet` does not provide a usable Python `len()`.
 
 ### `SqliteResultSet`
-Result set implementation specifically for SQLite databases. Handles SQLite's lack of `rowcount` support.
+Result set returned by SQLite queries. SQLite SELECT cursors do not supply a
+usable row count; `len(result)` is unsupported (`TypeError`). This does not
+prevent consuming the remaining rows with `result.list()`.
 
 #### Methods
-- `__next__()`: Overrides next method to handle SQLite-specific behavior with head buffering.
-- `__bool__()`: Checks if result set has data by peeping into the result.
+- `__bool__()`: Peeks at the next remaining row. Repeated truth tests do not consume rows. Returns `False` on empty or exhausted results.
+- `__next__()` and `list()`: Consume any peeked row exactly once before reading further rows from the cursor. This also applies to `next()`, `first()` and forward indexing, which share the same consumption path.
+
+#### Executable SQLite example
+This example uses an owned in-memory database, not an application database. The
+explicit `ORDER BY` defines the row order used by the indices.
+
+```python
+import web
+
+db = web.database(dbn="sqlite", db=":memory:")
+try:
+    sql = "SELECT n FROM (SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4) ORDER BY n"
+    result = db.query(sql)
+    assert bool(result) and bool(result)  # Peek, without consuming position 0.
+    assert next(result).n == 1
+    assert result[2].n == 3               # Consume position 1, return position 2.
+    assert result.first().n == 4          # The next remaining row, not row 1.
+    assert result.first("empty") == "empty"
+    assert not result
+
+    remaining = db.query(sql)
+    assert bool(remaining)
+    rows = remaining.list()              # Includes the buffered first row once.
+    assert [row.n for row in rows] == [1, 2, 3, 4]
+    assert remaining.list() == []
+    assert rows[2].n == 3                 # Reusable ordinary list.
+finally:
+    db.ctx.db.close()
+```
 
 ### `Transaction`
 Database transaction management class. Supports context manager protocol for automatic commit/rollback.

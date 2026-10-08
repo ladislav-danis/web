@@ -526,14 +526,13 @@ class BaseResultSet:
         self._index += 1
         return self._prepare_row(row)
 
-    next = __next__  # for python 2.7 support
+    def next(self):  # compatibility with callers using .next()
+        return self.__next__()
 
     def first(self, default=None):
-        """Returns the first row of this ResultSet or None when there are no
-        elements.
+        """Consumes the next remaining row, or returns default when exhausted.
 
-        If the optional argument default is specified, that is returned instead
-        of None when there are no elements.
+        Repeated calls advance the result set; they do not rewind the cursor.
         """
         try:
             return next(iter(self))
@@ -547,9 +546,7 @@ class BaseResultSet:
         try:
             while i > self._index:
                 next(self)
-                self._index += 1
-            # now self._index == i
-            self._index += 1
+            # now self._index == i; only successful consumption advances it.
             return next(self)
         except StopIteration:
             raise IndexError(str(i))
@@ -572,10 +569,17 @@ class SqliteResultSet(BaseResultSet):
         BaseResultSet.__init__(self, cursor)
         self._head = None
 
+    def list(self):
+        rows = [next(self)] if self._head is not None else []
+        rows.extend(super().list())
+        return rows
+
     def __next__(self):
         if self._head is not None:
+            row = self._head
+            self._head = None
             self._index += 1
-            return self._head
+            return row
         else:
             return super().__next__()
 
