@@ -214,6 +214,96 @@ DB(db_module, keywords)
 - `_process_insert_query(query, tablename, seqname)`: Processes insert queries for specific databases.
 - `transaction()`: Starts a new transaction.
 
+#### Identifier checks and their limits (this fork)
+The DML builders use the internal `_sql_safe_identifier` helper. Failed checks
+raise `SQLInjectionError`, available as `web.db.SQLInjectionError` or via
+`from web.db import SQLInjectionError`; it is **not** star-exported.
+
+The helper rejects non-strings and the empty string, then applies `.match()`
+to exactly `^[a-zA-Z_][a-zA-Z0-9_]*$|^".*"$`. The first alternative accepts an
+ASCII letter or underscore followed by ASCII letters, digits or underscores.
+Thus `users`, `_private` and `user_data2` pass, while `public.users`, unquoted
+spaces, hyphens and non-ASCII names fail. The second alternative accepts a
+string enclosed in double quotes, including `"table name"`, **empty quoted
+content**, embedded quotes and punctuation. `.` does not match a newline;
+Python's `$` can match just before a final newline, so even `users\n` passes.
+The helper returns the input unchanged: it does not escape quotes, verify SQL
+syntax or parse a single SQL identifier. Double-quoted acceptance is **not a
+security guarantee**. Keep identifiers application-controlled (for user choices,
+map a bounded allowlist to fixed identifiers); do not quote arbitrary input and
+assume that passing this check makes it safe.
+
+| Method | Fields checked, ordering and exceptions |
+| --- | --- |
+| `insert` | Checks `tablename` first, even with no values. With values, checks every keyword column name. Without values, builds the backend's default-values insert; the base default-values helper also checks the table. |
+| `multiple_insert` | A falsy `values` returns `[]` **before any identifier check**. Otherwise checks `tablename`. If `supports_multiple_insert` is false (SQLite's default), delegates each row to `insert`, which checks its columns; this branch does not enforce identical key sets across rows. With the flag true, checks the first row's keys, then requires every row to have that same key set (`ValueError` on mismatch). It does not separately validate later differing keys. A nonempty list of empty dictionaries is not the empty-list early return. |
+| `update` | A string `tables` is checked once; otherwise each element is checked. A noniterable such as `None` or an integer raises `TypeError` at iteration, not `SQLInjectionError`; an empty iterable checks nothing. Checks each column in `values`, even when `where` is empty. There is no empty-values no-op: it can generate an empty `SET` clause. |
+| `delete` | Always checks `table`. Checks `using` only when truthy: each list/tuple element, or the single supplied value otherwise. Falsy `using` is ignored. `FirebirdDB.delete` discards `using` before calling the base method. |
+| `select` / `where` / `query` | Do **not** apply this identifier checker. `select` accepts SQL in `tables`, `what`, `where`, `group` and `order`; `where()` delegates to `select`. Dictionary WHERE keys (also in update/delete), `sqlwhere` keys and `seqname` are not checked by this helper. |
+
+Checks occur before the normal `_test=True` return. `_test` builds SQL without
+executing it; it neither bypasses the checks above nor validates the resulting
+SQL with a database. `multiple_insert` retains its early-return/delegation
+behavior in test mode: fallback returns a list of queries, or `None` with
+`seqname=False`; optimized mode returns one query. Python's `**kwargs` boundary
+itself rejects non-string column keys in insert/update and delegated inserts;
+optimized `multiple_insert` checks its first-row keys directly.
+
+WHERE handling is separate. `delete` with `where=''` or `{}` omits WHERE and
+can delete **all rows**; `where=None` is not supported by the base delete/update
+path and currently raises `AttributeError`. `update` with `where=''` retains
+an empty WHERE clause, and `{}` currently raises `TypeError`. `select` omits a
+`None` WHERE but an explicitly empty string/dictionary produces a bare WHERE;
+`where()` with no keyword conditions instead passes `None`. These are builder
+behaviors, not guarantees of valid SQL or automatic no-ops.
+
+Ordinary values in insert/update/multiple_insert and `$name` substitutions are
+bound parameters. This protects **values**, not SQL syntax, identifier strings
+or arbitrary `where`/`order` expressions. `SQLLiteral`/`sqlliteral` deliberately
+inserts raw SQL rather than a bound value. Use only trusted SQL expressions;
+never treat these builders or their identifier regex as universal injection
+protection. Backend grammar and feature support remain separate concerns.
+
+#### Executable identifier and value example
+Owned in-memory SQLite only; no external driver/server. The quoted identifiers
+below are fixed application constants, not quoting advice for untrusted input.
+
+```python
+import web
+from web.db import SQLInjectionError
+
+db = web.database(dbn='sqlite', db=':memory:')
+try:
+    db.query('CREATE TABLE "user data" (id INTEGER PRIMARY KEY, name TEXT)')
+    literal_value = "O'Reilly'); DROP TABLE users; --"
+    built = db.insert('"user data"', name=literal_value, _test=True)
+    assert built.query('qmark') == 'INSERT INTO "user data" (name) VALUES (?)'
+    assert built.values() == [literal_value]
+    assert db.insert('"user data"', name=literal_value) == 1
+    assert db.select('"user data"', where='id=$id', vars={'id': 1}).first().name == literal_value
+    db.multiple_insert('"user data"', [{'name': 'second'}, {'name': 'third'}])
+    assert db.update('"user data"', where='id=$id', vars={'id': 1}, name='updated') == 1
+    assert db.delete('"user data"', where='id=$id', vars={'id': 999}) == 0
+    remaining_names = [row.name for row in db.select('"user data"', order='id')]
+    assert remaining_names == ['updated', 'second', 'third']
+
+    try:
+        db.insert('public.users', name='x', _test=True)
+    except SQLInjectionError:
+        pass  # Rejected before SQL execution, even in test mode.
+    else:
+        raise AssertionError('Unquoted schema-qualified DML name was accepted')
+
+    raw = db.select('public.users AS u', what='u.name',
+                    where='u.name=$name', vars={'name': literal_value},
+                    order='u.name DESC', _test=True)
+    assert raw.query() == 'SELECT u.name FROM public.users AS u WHERE u.name=%s ORDER BY u.name DESC'
+    assert raw.values() == [literal_value]
+    # Generated only: SELECT does not run the DML identifier checker.
+finally:
+    db.ctx.db.close()
+```
+
 ### Database-Specific Classes
 
 #### `PostgresDB`
@@ -292,12 +382,29 @@ OracleDB(**keywords)
 ## Functions
 
 ### `import_driver(drivers, preferred=None)`
-Imports the first available driver or preferred driver from a list of drivers.
+With a falsy `preferred` (the default), tries `drivers` in order, continuing
+on `ImportError`. If none imports, raises `ImportError`. A **truthy** `preferred`
+replaces the entire candidate tuple with `(preferred,)`: it selects one
+mandatory driver, not a hint with fallback. It can name a driver outside the
+original tuple. This helper imports a module; it does not open a connection.
+Use `from web.db import import_driver`, not a star import.
 
 #### Example
+This offline example uses standard-library SQLite and a deliberately nonexistent
+module; no optional driver or database server is needed.
+
 ```python
-# Try to import psycopg2, fall back to other drivers if not available
-db = import_driver(('psycopg2', 'psycopg'), preferred='psycopg2')
+from web.db import import_driver
+
+missing = '_web5_nonexistent_driver_68241'
+driver = import_driver((missing, 'sqlite3'))
+assert driver.__name__ == 'sqlite3'  # Fallback without preferred.
+try:
+    import_driver(('sqlite3',), preferred=missing)
+except ImportError:
+    pass  # Mandatory preferred is missing, despite sqlite3 being available.
+else:
+    raise AssertionError('A missing preferred driver must not fall back')
 ```
 
 ### `database(dburl=None, **params)`
@@ -326,17 +433,25 @@ db = database(dbn='custom', db='test')
 ```
 
 ### `dburl2dict(url)`
-Parses a database URL into a dictionary of connection parameters.
+Parses a database URL into connection parameters, without connecting. Import
+it explicitly from `web.db`. The implementation applies `unquote` to the URL
+before parsing; a literal `***` password remains `***`. It cannot reconstruct
+a secret hidden by a redaction. All credentials below are fictitious examples.
 
 #### Supported URL Formats
-- PostgreSQL: `postgres://user:pass@host:port/dbname`
-- MySQL: `mysql://user:pass@host:port/dbname`
+- PostgreSQL: `postgres://user:***@host:port/dbname`
+- MySQL: `mysql://user:***@host:port/dbname`
 - SQLite: `sqlite:///path/to/dbfile` or `sqlite:////absolute/path/to/dbfile`
 
 #### Example
 ```python
->>> dburl2dict('postgres://james:day@serverfarm.example.net:5432/mygreatdb')
-{'pw': 'day', 'dbn': 'postgres', 'db': 'mygreatdb', 'host': 'serverfarm.example.net', 'user': 'james', 'port': 5432}
+from web.db import dburl2dict
+
+params = dburl2dict('postgres://james:***@serverfarm.example.net:5432/mygreatdb')
+assert params == {
+    'pw': '***', 'dbn': 'postgres', 'db': 'mygreatdb',
+    'host': 'serverfarm.example.net', 'user': 'james', 'port': 5432,
+}
 ```
 
 ### `sqllist(lst)`
@@ -543,43 +658,42 @@ db.insert('logs', created=sqlliteral('NOW()'))
 
 ## `__all__` Exports
 
-The module exports the following names:
+`web.db.__all__` contains exactly these names, in source order. They are
+available through `from web.db import *` and propagated by `web/__init__.py`
+as `web.<name>`:
 
-### Exceptions
-- `UnknownDB`: Raised for unsupported database backends.
-- `TransactionError`: Raised for transaction errors.
-- `UnknownParamstyle`: Raised for unsupported parameter styles.
-
-### Classes
-- `SQLParam`: Parameter in SQL queries.
+- `UnknownParamstyle`: Unsupported parameter style exception.
+- `UnknownDB`: Unsupported database backend exception.
+- `TransactionError`: Transaction exception.
+- `sqllist`: Convert names to a comma-separated string (not identifier validation).
+- `sqlors`: Build an OR clause.
+- `reparam`: Bind template values in an SQLQuery.
+- `sqlquote`: Represent values as SQL parameters.
 - `SQLQuery`: SQL query builder.
-- `SQLLiteral`: SQL literal protector.
-- `BaseResultSet`: Base result set class.
-- `ResultSet`: Result set for most databases.
-- `SqliteResultSet`: Result set for SQLite.
-- `Transaction`: Transaction management.
+- `SQLParam`: Bound parameter wrapper.
+- `sqlparam`: Alias for SQLParam.
+- `SQLLiteral`: Raw SQL expression wrapper, not a bound value.
+- `sqlliteral`: Alias for SQLLiteral.
+- `database`: Database factory.
 - `DB`: Base database class.
 
-### Database-Specific Classes
-- `PostgresDB`: PostgreSQL implementation.
-- `MySQLDB`: MySQL implementation.
-- `SqliteDB`: SQLite implementation.
-- `FirebirdDB`: Firebird implementation.
-- `MSSQLDB`: Microsoft SQL Server implementation.
-- `OracleDB`: Oracle implementation.
+Other members documented on this page exist as attributes of `web.db`, but
+are **not** in this export list and are not automatically `web.<name>`.
+For example, result-set classes, `Transaction`, database-specific classes,
+`sqlwhere`, `sqlify`, `import_driver`, `register_database`, `dburl2dict` and
+`SQLInjectionError` require module-qualified access or explicit imports:
 
-### Functions
-- `sqllist(lst)`: Convert list to comma-separated string.
-- `sqlors(left, lst)`: Create OR clause.
-- `sqlwhere(data, grouping=" AND ")`: Create WHERE clause.
-- `sqlquote(a)`: Quote values for SQL.
-- `reparam(string_, dictionary)`: Interpolate string with dictionary.
-- `sqlify(obj)`: Convert Python object to SQL representation.
-- `import_driver(drivers, preferred=None)`: Import database driver.
-- `database(dburl=None, **params)`: Create database instance.
-- `register_database(name, clazz)`: Register new database class.
-- `dburl2dict(url)`: Parse database URL.
-- `sqlliteral(value)`: Create SQL literal.
+```python
+import web
+from web.db import SqliteDB, sqlwhere, SQLInjectionError
+
+assert SqliteDB is web.db.SqliteDB
+assert SQLInjectionError is web.db.SQLInjectionError
+assert web.sqlparam is web.SQLParam
+condition = sqlwhere((('name', "O'Reilly"),))
+assert condition.query() == 'name = %s'
+assert condition.values() == ["O'Reilly"]
+```
 
 ## See Also
 
