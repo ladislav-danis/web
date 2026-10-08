@@ -66,7 +66,7 @@ app.add_processor(log_request)
 
 ##### `browser()`
 
-Returns an `AppBrowser` instance for testing the application.
+Returns an `AppBrowser` instance for testing the application. GET navigation works; on the pinned Python 3 implementation, nonempty POST bodies cannot pass through the browser adapter. Use direct `app.request` with `str` or `dict` data for POST tests; see the [browser limitations](browser.md#pinned-python-3-limitations).
 
 **Example:**
 ```python
@@ -76,12 +76,12 @@ browser.open("/hello")
 
 ##### `request(localpart: str = "/", method: str = "GET", data: Optional[Union[str, bytes, Dict[str, Any]]] = None, host: str = "0.0.0.0:8080", headers: Optional[Dict[str, str]] = None, https: bool = False, **kw: Any) -> web.storage`
 
-Simulates a request to the application for testing purposes.
+Simulates a request to the application for testing purposes. The signature above reproduces the source annotation, **not a guarantee that every annotated type works**. In the pinned implementation (`a540a4bd0ce90ad3cd8c2c91c9fbfd332eabb7ed`), a nonempty `bytes` body for a non-GET/HEAD request raises `AttributeError: 'bytes' object has no attribute 'encode'` before the handler runs. `None` or an empty body becomes an empty string; GET/HEAD do not use this body conversion. This source defect remains unresolved and is tracked for a separate source repair through [web#3, A-006](https://git.home.arpa/mosaic-ai/web/issues/3).
 
 **Parameters:**
 - `localpart`: The full URL path (including query string), e.g., `/hello?name=world`.
 - `method`: HTTP method (GET, POST, etc).
-- `data`: Request body data (for POST/PUT requests).
+- `data`: For direct POST/PUT tests, use a `str` body or a `dict` (URL-encoded by the helper), not nonempty `bytes`. For form data use an ASCII URL-encoded string and an explicit content type as below. Encode repeated keys yourself with `urlencode(pairs)`; dictionary list values are not automatically expanded with `doseq=True`. This is not a general binary-upload recipe.
 - `host`: Host address for the request.
 - `headers`: Dictionary of HTTP headers.
 - `https`: Whether to simulate HTTPS.
@@ -92,6 +92,33 @@ Simulates a request to the application for testing purposes.
 ```python
 response = app.request("/hello", headers={"User-Agent": "Test Client"})
 assert response.data == b"Hello, world!"
+```
+
+##### Direct POST workaround
+
+This standalone example exercises the real in-process application, not AppBrowser or a network server. Neither request inherits a browser cookie jar; for an authenticated/CSRF-protected application, explicitly carry the required cookie/header/token from its own session flow. Plain web.py does not add that policy automatically.
+
+```python
+import web
+from urllib.parse import urlencode
+
+received = []
+class Echo:
+    def POST(self):
+        values = dict(web.input())
+        received.append(values)
+        return values['message']
+
+app = web.application(('/echo', Echo), {}, autoreload=False)
+headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+response = app.request('/echo', method='POST',
+                       data={'message': 'hello world'}, headers=headers)
+raw_response = app.request('/echo', method='POST',
+                           data=urlencode([('message', 'hello world')]),
+                           headers=headers)
+assert response.status == raw_response.status == '200 OK'
+assert response.data == raw_response.data == b'hello world'
+assert received == [{'message': 'hello world'}, {'message': 'hello world'}]
 ```
 
 ##### `handle()`
