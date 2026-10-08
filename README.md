@@ -4,32 +4,38 @@ A lightweight Python web framework providing routing, templating, form handling,
 
 ## Overview
 
-This framework is built on a modified version of web.py and provides the foundation for the Mosaic platform's service-oriented architecture. It includes a template rendering system with layout support, a form validation system, session middleware with CSRF protection, and a modular architecture that allows plugins to register routes and services at runtime.
+This repository contains the modified web.py library used by Mosaic. It can also run standalone applications without Mosaic Core. The library provides explicit URL-to-handler mappings, request processors, built-in template rendering, forms, and configurable server-side session stores. It does not discover Mosaic modules or provide `ModuleContext`.
 
-The framework is designed for simplicity and rapid development while maintaining security through built-in CSRF protection, session management, and role-based access control integration.
+**Security boundary:** a plain `web.application` dispatches a POST to its handler without requiring a CSRF token, login, or role. Adding `web.session.Session` does not add CSRF checks or role-based access control. Applications must configure their own authentication, authorization, and CSRF protection; session cookies alone are not those protections.
+
+Mosaic adds a separate application layer: [Core's `ModuleContext`](https://git.home.arpa/mosaic-ai/core/src/branch/main/src/core/registry.py), [module discovery and application wiring](https://git.home.arpa/mosaic-ai/core/src/branch/main/src/core/app.py), and [CSRF/access helpers and policy](https://git.home.arpa/mosaic-ai/core/src/branch/main/src/core/access.py). Core wires these processors into its own application. Their behavior depends on that configuration, route exceptions, and handler-level checks; importing this library does not enable them or guarantee protection of every endpoint.
 
 ## Documentation
 
+The index below describes the library components. The linked reference pages are separate documents; for exact current behavior, consult the corresponding source files and tests.
+
 | File | Description |
 |------|-------------|
-| [application.md](./docs/application.md) | Application factory, module loading, and configuration |
-| [browser.md](./docs/browser.md) | Browser detection and user-agent handling |
-| [db.md](./docs/db.md) | Database abstraction layer and query helpers |
+| [application.md](./docs/application.md) | Explicit route mappings, HTTP method dispatch, request processors, and WSGI application |
+| [browser.md](./docs/browser.md) | `AppBrowser` in-process application client and `Browser` network HTTP client |
+| [db.md](./docs/db.md) | Multi-backend database abstraction and parameterized query helpers |
 | [debugerror.md](./docs/debugerror.md) | Debug mode error pages and traceback display |
 | [form.md](./docs/form.md) | Form definitions, validation, and rendering |
-| [http.md](./docs/http.md) | HTTP request/response objects and utilities |
-| [httpserver.md](./docs/httpserver.md) | Built-in HTTP server configuration |
+| [http.md](./docs/http.md) | HTTP cache headers, URL/query helpers, and profiling |
+| [httpserver.md](./docs/httpserver.md) | Built-in HTTP server and static-file serving |
 | [net.md](./docs/net.md) | Network utilities (IP validation, URL encoding, date handling) |
 | [py3helpers.md](./docs/py3helpers.md) | Python 3 compatibility helpers |
-| [session.md](./docs/session.md) | Session management and middleware |
-| [template.md](./docs/template.md) | Template rendering, layouts, and globals |
+| [session.md](./docs/session.md) | Server-side session stores and session-ID cookie handling |
+| [template.md](./docs/template.md) | Built-in template rendering, optional layouts, and globals |
 | [test.md](./docs/test.md) | Testing utilities and test helpers |
 | [utils.md](./docs/utils.md) | General utility functions |
-| [webapi.md](./docs/webapi.md) | API classes (HTTP, WSGI, utilities) |
-| [wsgi.md](./docs/wsgi.md) | WSGI application interface |
-| [contrib/template.md](./docs/contrib/template.md) | Template contribution guidelines |
+| [webapi.md](./docs/webapi.md) | Request context, input/cookies, response headers, and HTTP errors |
+| [wsgi.md](./docs/wsgi.md) | WSGI server startup helpers, including FastCGI/SCGI dispatch |
+| [contrib/template.md](./docs/contrib/template.md) | Optional third-party template-engine adapters |
 
 ## Quick Start
+
+With this library and its dependencies available on Python's import path, save this as `hello.py` (not `web.py`) and run `python hello.py`. Visit `http://localhost:8080/hello`; stop the development server with Ctrl-C. No Mosaic Core configuration, session, or database is needed.
 
 ```python
 import web
@@ -43,11 +49,14 @@ app = web.application(urls, globals())
 app.run()
 ```
 
+For an offline check, the resulting `app.request('/hello')` returns status `200 OK` and data `b'Hello, world!'` without a listening server. The [README smoke tests](./tests/test_readme_contract.py) execute the exact fence with only the blocking `app.run()` entry point intercepted, then exercise the real application.
+
 ## Key Components
 
-- **Routing**: URL patterns mapped to handler classes with HTTP method dispatch
-- **Templating**: FileSystemLoader with layout support and injected globals
-- **Forms**: Declarative form definitions with validation and rendering
-- **Sessions**: Cookie-based sessions with configurable storage and CSRF tokens
-- **Database**: SQLite abstraction with parameterized queries
-- **Modules**: Runtime module discovery and route registration via `ModuleContext`
+- **Routing** ([source](./application.py)): `web.application(mapping, fvars)` maps URL patterns to handler classes and dispatches their HTTP methods. `app.add_mapping(pattern, handler)` explicitly adds a route. Optional autoreloading of imported code is not Mosaic module discovery or a service/plugin registry.
+- **Templating** ([source](./template.py)): the built-in `web.template.Render` (also exposed as `web.template.render`) loads template files itself, with optional `base` layout wrapping and `globals`. `FileSystemLoader` belongs to the optional Jinja2 adapter in [contrib/template.py](./contrib/template.py), not the built-in renderer. That module also provides Cheetah, Genshi, and Mako adapters; each needs its third-party engine installed separately.
+- **Forms** ([source](./form.py)): declarative form definitions with validation and rendering, not automatic CSRF or authorization enforcement.
+- **Sessions** ([source](./session.py)): `Session` loads/saves server-side state through `DiskStore`, `DBStore`, or `MemoryStore`; the browser cookie carries a session ID, not the session payload. Configure a non-default `web.config.session_parameters.secret_key` before constructing a session, and choose cookie/storage settings for your deployment. There is no automatic CSRF-token generation or RBAC policy in this layer.
+- **Database** ([source](./db.py)): `web.database` provides parameterized query helpers with six built-in `dbn` registrations: `mysql` (MySQL), `postgres` (PostgreSQL), `sqlite` (SQLite), `firebird` (Firebird), `mssql` (SQL Server), and `oracle` (Oracle). Use these exact registration names, not `postgresql`, `sqlite3`, or `sqlserver`. Backends require their corresponding drivers and connection configuration; registration does not imply those dependencies are installed.
+- **HTTP clients** ([source](./browser.py)): `AppBrowser`, also returned by `app.browser()`, sends requests in-process through `app.request`; `Browser` uses urllib for network HTTP requests. These are clients, not user-agent detection or JavaScript browser automation.
+- **Mosaic integration**: module discovery, `ModuleContext`, and configured CSRF/access processors belong to the separately configured Core layer linked above, not this library's standalone API.
