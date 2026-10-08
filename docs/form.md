@@ -41,12 +41,14 @@ u'<table>\n    <tr><th><label for="x">x</label></th><td><input id="x" name="x" t
 
 ##### `render_css()`
 
-Renders the form with CSS-friendly output (no table structure).
+Renders the form with CSS-friendly output (no table structure). The label and
+input are adjacent; each input ends with a newline. Python 3 displays:
 
 ```python
->>> f = Form(Textbox("x"))
+>>> from web import form
+>>> f = form.Form(form.Textbox("x"))
 >>> f.render_css()
-u'<label for="x">x</label>\n<input id="x" name="x" type="text"/>\n'
+'<label for="x">x</label><input id="x" name="x" type="text"/>\n'
 ```
 
 ##### `validates(source=None, _validate=True, **kw)`
@@ -113,13 +115,17 @@ Storage({'x': '42'})
 
 #### Usage
 
+Run inside a request handler; `f.validates()` reads `web.input()`. This minimal
+example has no field validators. See the validation examples below for required
+fields and other server-side checks.
+
 ```python
 from web import form
 
-f = Form(
-    Textbox("username", description="Username"),
-    Password("password", description="Password"),
-    Button("submit", html="Login")
+f = form.Form(
+    form.Textbox("username", description="Username"),
+    form.Password("password", description="Password"),
+    form.Button("submit", html="Login")
 )
 
 if f.validates():
@@ -263,7 +269,9 @@ GroupedDropdown(name, args, *validators, **attrs)
 **Example:**
 
 ```python
-GroupedDropdown(
+from web import form
+
+car_type = form.GroupedDropdown(
     "car_type",
     args=(
         ("Swedish Cars", ("Volvo", "Saab")),
@@ -271,6 +279,7 @@ GroupedDropdown(
     ),
     value="Audi"
 )
+print(car_type.render())
 ```
 
 ##### `Radio`
@@ -598,10 +607,10 @@ attrget(obj, "attribute")  # obj.attribute
 ```python
 from web import form
 
-f = Form(
-    Textbox("username", description="Username"),
-    Password("password", description="Password"),
-    Button("submit", html="Login")
+f = form.Form(
+    form.Textbox("username", description="Username"),
+    form.Password("password", description="Password"),
+    form.Button("submit", html="Login")
 )
 
 print(f.render())
@@ -609,7 +618,16 @@ print(f.render())
 
 ### Form Validation
 
+Run this block inside a request handler. Required-field checks are server-side;
+an HTML input type or attribute alone does not register a validator.
+
 ```python
+from web import form
+
+f = form.Form(
+    form.Textbox("username", form.notnull),
+    form.Password("password", form.notnull)
+)
 if f.validates():
     # Form is valid
     username = f.d.username
@@ -621,51 +639,90 @@ else:
 
 ### Custom Validation
 
+Field validators are positional arguments before keyword attributes, unlike
+`Form(validators=[...])`. A field's `validators=` keyword is just an HTML
+attribute; it does **not** register validation. Wrap predicates in `Validator`.
+This example accepts a string of ASCII digits representing an age from 0 to 150.
+The type guard runs before `regexp`, which expects a string (not `None`).
+
 ```python
+from web import form
+
+
 def is_valid_age(value):
     try:
-        age = int(value)
-        return age >= 0 and age <= 150
-    except:
+        return 0 <= int(value) <= 150
+    except (TypeError, ValueError):
         return False
 
-f = Form(
-    Textbox("age", 
-            description="Age",
-            validators=[regexp(r"^\d+$", "Must be a number"),
-                       is_valid_age])
+
+f = form.Form(
+    form.Textbox(
+        "age",
+        form.Validator("Must be text", lambda value: isinstance(value, str)),
+        form.regexp(r"\A[0-9]+\Z", "Must be a number"),
+        form.Validator("Age must be between 0 and 150", is_valid_age),
+        description="Age",
+    )
 )
 ```
 
 ### Form with Multiple Inputs
 
+Validators such as `notnull` and `regexp` precede keyword attributes. The
+password requires at least six characters; `notnull` rejects missing/empty
+values before the string regexp runs. `Email` selects an HTML input type; it
+does not by itself validate an address on the server.
+
 ```python
-f = Form(
-    Textbox("username", description="Username", notnull),
-    Email("email", description="Email"),
-    Password("password", description="Password", validators=[regexp(".{6,}", "At least 6 characters")]),
-    Checkbox("agree", description="I agree to the terms"),
-    Button("submit", html="Register")
+from web import form
+
+f = form.Form(
+    form.Textbox("username", form.notnull, description="Username"),
+    form.Email("email", description="Email"),
+    form.Password("password", form.notnull,
+                  form.regexp(r".{6,}", "At least 6 characters"),
+                  description="Password"),
+    form.Checkbox("agree", description="I agree to the terms"),
+    form.Button("submit", html="Register")
 )
 ```
 
 ### Form with Form-Level Validators
 
-```python
-def passwords_match(values):
-    return values.password == values.confirm_password
+`Form(validators=[...])` requires validator objects (with `valid` and `msg`),
+not bare functions. They receive the **whole source** passed to `validates`,
+including extra keys, not `f.d` or a single field. They run only after all
+field validators pass. The example uses mapping access, so either a nonempty
+plain dict or `web.storage` from `web.input()` works. Attribute access such as
+`values.password` would require storage (or another attribute-bearing object),
+not a plain dict. `validates()` without a truthy source or keyword values reads
+`web.input()` and therefore needs an active request.
 
-f = Form(
-    Password("password", description="Password"),
-    Password("confirm_password", description="Confirm Password"),
-    validators=[passwords_match]
+```python
+from web import form
+
+
+def passwords_match(values):
+    return values["password"] == values["confirm_password"]
+
+
+f = form.Form(
+    form.Password("password", form.notnull, description="Password"),
+    form.Password("confirm_password", form.notnull, description="Confirm Password"),
+    validators=[form.Validator("Passwords must match", passwords_match)]
 )
 ```
 
 ### Using Form with web.input()
 
+Run inside a request handler to read its actual input mapping.
+
 ```python
-f = Form(Textbox("name"))
+import web
+from web import form
+
+f = form.Form(form.Textbox("name", form.notnull))
 if f.validates(web.input()):
     # Process validated input
     pass
@@ -674,14 +731,18 @@ if f.validates(web.input()):
 ### Rendering Form with CSS
 
 ```python
-f = Form(Textbox("name"))
+from web import form
+
+f = form.Form(form.Textbox("name"))
 print(f.render_css())  # No table structure
 ```
 
 ### Accessing Form Values
 
 ```python
-f = Form(Textbox("username"), Textbox("email"))
+from web import form
+
+f = form.Form(form.Textbox("username"), form.Textbox("email"))
 f.fill(username="john", email="john@example.com")
 
 # Access via attribute
@@ -697,21 +758,34 @@ print(f.d)  # Storage({'username': 'john', 'email': 'john@example.com'})
 ### Pre-filling Form Data
 
 ```python
-f = Form(Textbox("name"), Textbox("email"))
+from web import form
+
+f = form.Form(form.Textbox("name"), form.Textbox("email"))
 f.fill(name="John", email="john@example.com")
 print(f.render())  # Values pre-filled in inputs
 ```
 
 ### Conditional Form Rendering
 
+Run this block inside a request handler: `web.input()` reads that request.
+The regexp is a **field** validator receiving the email string, not the whole
+input mapping. This is a simple lowercase `.com` example, not complete email
+address validation. Missing/empty email is rejected before applying the regexp.
+Without a truthy `submit` parameter the form is rendered without validation.
+
 ```python
-f = Form(
-    Textbox("email", description="Email"),
-    validators=[regexp(r".+@.+\.com", "Must be a .com email")]
+import web
+from web import form
+
+f = form.Form(
+    form.Textbox("email", form.notnull,
+                 form.regexp(r"\A[^@\s]+@[^@\s]+\.com\Z", "Must be a .com email"),
+                 description="Email")
 )
 
-if web.input().get("submit"):
-    if f.validates():
+source = web.input()
+if source.get("submit"):
+    if f.validates(source):
         # Process form
         pass
     else:
@@ -722,3 +796,4 @@ else:
     pass
 
 print(f.render())
+```

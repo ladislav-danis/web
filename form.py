@@ -361,8 +361,7 @@ class GroupedDropdown(Dropdown):
     """  # noqa: E501
 
     def __init__(self, name, args, *validators, **attrs):
-        self.args = args
-        super().__init__(name, *validators, **attrs)
+        super().__init__(name, args, *validators, **attrs)
 
     def render(self):
         attrs = self.attrs.copy()
