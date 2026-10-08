@@ -17,27 +17,26 @@ The module is inspired by Django's debug error pages and includes:
 
 ### `debugerror()`
 
-Returns an internal error handler that displays a detailed debug page with stack trace information, request data, and local variables.
+Constructs an HTTP error containing a detailed debug page for the currently handled exception, including stack trace information, request data, and local variables. Development only: this content is sensitive.
 
-**Returns:** A function that returns a `web._InternalError` containing the HTML debug page
+**Returns:** A non-callable `web.webapi._InternalError` instance (an `HTTPError`) containing the HTML debug page. `_InternalError` is not exported at the `web` package root. Register the callable itself as `app.internalerror = debugerror`, without calling it during registration.
 
 **Usage:**
 ```python
 import web
 from web.debugerror import debugerror
 
-# Enable debug mode and set error handler
+# Development only: this page exposes sensitive diagnostics.
 web.config.debug = True
-web.internalerror = debugerror
-
-# Your application code here
+app = web.application((), globals())  # Add your routes here.
+app.internalerror = debugerror
 ```
 
 ### `djangoerror()`
 
 Generates a Django-style error page with detailed debugging information. This function is called internally by `debugerror()` and can also be used directly for custom error handling.
 
-**Returns:** HTML content for the debug error page containing:
+**Returns:** A rendered `web.template.TemplateResult` (convertible to HTML text), not an `HTTPError`. It contains:
 - Exception type and value
 - Full stack trace with source code context (7 lines before/after)
 - Local variables at each stack frame
@@ -51,7 +50,7 @@ Generates a Django-style error page with detailed debugging information. This fu
 
 ### `emailerrors(to_address, olderror, from_address=None)`
 
-Creates an error handler that emails error details to a specified address while still displaying the normal error page. This is useful for production environments where you want to be notified of errors without exposing debug information to users.
+Creates a callable that emails diagnostic details and returns the result of `olderror()` unchanged. It does not sanitize that response: use a non-debug handler for production. Reports, attachments, subjects and logs can contain sensitive data; restrict their access and retention.
 
 **Parameters:**
 - `to_address` (str): Email address to send error notifications to
@@ -59,22 +58,23 @@ Creates an error handler that emails error details to a specified address while 
 - `from_address` (str, optional): Sender email address. Defaults to `to_address`
 
 **Returns:** A new error handler function that:
-1. Calls the original error handler to display the error page
+1. Calls `olderror()` first to construct the response error object
 2. Sends an email with:
    - Text traceback in the message body
    - HTML debug page as an attachment named `bug.html`
    - Subject line with error type, value, and path
+3. Returns the same error object after sending. Handler or mail failures propagate; this wrapper does not guarantee delivery or a fallback response.
 
 **Usage:**
 ```python
 import web
-from web.debugerror import emailerrors, debugerror
+from web.debugerror import emailerrors
 
-# Set up email error reporting for production
-web.config.debug = False  # Hide debug from users
-web.internalerror = emailerrors('developer@example.com', debugerror)
-
-# Errors will be emailed to the developer while showing a normal error page
+# Production: configure before constructing the application.
+web.config.debug = False
+app = web.application((), globals())  # Add your routes here.
+olderror = app.internalerror  # Capture the bound default before replacing it.
+app.internalerror = emailerrors('developer@example.com', olderror)
 ```
 
 ## Constants
@@ -138,7 +138,7 @@ The `djangoerror_t` template uses the following variables:
 
 ### Basic Debug Mode
 
-Enable detailed error pages during development:
+Enable detailed error pages only during development. These pages expose sensitive exception, local-variable and request data:
 
 ```python
 import web
@@ -153,8 +153,8 @@ class Index:
         # This will cause a NameError
         return this_does_not_exist
 
-app = web.application(urls, globals())
 web.config.debug = True
+app = web.application(urls, globals())
 app.internalerror = debugerror
 
 if __name__ == '__main__':
@@ -167,7 +167,7 @@ Set up email notifications for production while hiding debug details:
 
 ```python
 import web
-from web.debugerror import emailerrors, debugerror
+from web.debugerror import emailerrors
 
 urls = (
     '/', 'Index'
@@ -178,9 +178,10 @@ class Index:
         # Your application code
         pass
 
+web.config.debug = False
 app = web.application(urls, globals())
-web.config.debug = False  # Hide debug from users
-app.internalerror = emailerrors('errors@example.com', debugerror)
+olderror = app.internalerror
+app.internalerror = emailerrors('errors@example.com', olderror)
 
 if __name__ == '__main__':
     app.run()
@@ -188,29 +189,34 @@ if __name__ == '__main__':
 
 ### Custom Error Handler with Django Error
 
-Create a custom error handler that uses the Django-style page:
+Development only: this custom handler exposes sensitive diagnostics. `djangoerror()` returns rendered template content, not an exception; wrap it in an `HTTPError` for the application hook:
 
 ```python
 import web
 from web.debugerror import djangoerror
 
-def custom_error_handler():
-    # Log the error to a file
-    import logging
-    logging.error("An error occurred: %s", str(web.ctx.get('error', 'Unknown')))
-    
-    # Return the Django-style error page
-    return djangoerror()
+web.config.debug = True
+app = web.application((), globals())  # Add your routes here.
 
-web.internalerror = custom_error_handler
+def custom_error_handler():
+    return web.HTTPError(
+        "500 Internal Server Error",
+        {"Content-Type": "text/html; charset=utf-8"},
+        djangoerror(),
+    )
+
+app.internalerror = custom_error_handler
 ```
 
 ### Combining with Custom Logging
 
+Production example: log the active exception and email diagnostics while retaining the non-debug public response. Logs and email remain sensitive; failures in logging or email are not handled by this example.
+
 ```python
 import web
-from web.debugerror import emailerrors, debugerror
+from web.debugerror import emailerrors
 import logging
+import sys
 
 # Configure logging
 logging.basicConfig(filename='app_errors.log', level=logging.ERROR)
@@ -226,7 +232,10 @@ def logged_email_errors(to_address, olderror):
     
     return handler
 
-web.internalerror = logged_email_errors('dev@example.com', debugerror)
+web.config.debug = False
+app = web.application((), globals())  # Add your routes here.
+olderror = app.internalerror
+app.internalerror = logged_email_errors('dev@example.com', olderror)
 ```
 
 ## Features
@@ -237,7 +246,7 @@ web.internalerror = logged_email_errors('dev@example.com', debugerror)
 4. **Email Notifications**: Can automatically email error reports to developers with both text and HTML versions
 5. **Template Support**: Works with web.py's template system for rendering error pages
 6. **Interactive UI**: JavaScript-powered toggling of stack frames and variable sections
-7. **Debug Mode Toggle**: Only active when `web.config.debug` is `True`
+7. **Default Handler Toggle**: The application's default handler consults `web.config.debug`. An explicitly registered `debugerror` (including one passed to `emailerrors`) bypasses this toggle and exposes diagnostics even when it is `False`.
 
 ## Internal Functions
 
@@ -280,10 +289,10 @@ Converts Python objects to a readable string representation using `pprint`.
 - Request and session data
 
 **Best Practices:**
-1. Always set `web.config.debug = False` in production
-2. Use `emailerrors()` to receive error notifications without exposing debug info
+1. Set `web.config.debug = False` before application creation in production, and keep it false. It is not a universal disclosure control for custom handlers.
+2. Capture `olderror = app.internalerror` before wrapping it with `emailerrors()`. Never pass `debugerror` as the production public-response handler; email reporting does not redact its return value.
 3. Never commit debug error pages to version control if they contain sensitive data
-4. Consider using a proper logging system instead of debug pages in production
+4. Treat diagnostic email (including subject and HTML attachment) and logs as sensitive. Configure transport, access and retention appropriately; neither this wrapper nor the debug toggle redacts them or makes mail failures resilient.
 
 ## Customization
 
@@ -330,8 +339,8 @@ Ensure the template file path is correct and the file exists. The template is em
 
 ### Debug Page Not Showing
 
-1. Verify `web.config.debug = True`
-2. Ensure `web.internalerror` is set to `debugerror`
+1. For development only, enable the default debug handler with `web.config.debug = True`
+2. If registering explicitly, use `app.internalerror = debugerror`, not the package-level `web.internalerror` alias. This explicit hook bypasses the debug toggle.
 3. Check that the exception is not being caught by other error handlers
 
 ## See Also

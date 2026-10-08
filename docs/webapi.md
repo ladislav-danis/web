@@ -428,12 +428,27 @@ web.setcookie("session_id", "", expires=-1)
 
 ### Custom Error Pages
 
+Application hooks must return an `HTTPError`, not a string: the framework raises the returned object. Register callbacks on the application instance. Do not call the no-argument `web.notfound()` or `web.internalerror()` dispatchers from their own hooks, which would recurse.
+
 ```python
+import web
+
+web.config.debug = False
+app = web.application((), globals())  # Add your routes here.
+
 def notfound():
-    return "<h1>404 - Page Not Found</h1>"
+    return web.HTTPError(
+        "404 Not Found",
+        {"Content-Type": "text/html; charset=utf-8"},
+        "<h1>404 - Page Not Found</h1>",
+    )
 
 def internalerror():
-    return "<h1>500 - Internal Server Error</h1>"
+    return web.HTTPError(
+        "500 Internal Server Error",
+        {"Content-Type": "text/html; charset=utf-8"},
+        "<h1>500 - Internal Server Error</h1>",
+    )
 
 # Configure application to use custom error handlers
 app.notfound = notfound
