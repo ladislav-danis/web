@@ -9,82 +9,129 @@ The http module provides various utility functions for HTTP operations including
 ## Functions
 
 ### `prefixurl(base="")`
-Generates a relative URL prefix based on the current path depth. This is useful for creating relative links that work correctly regardless of the current URL depth.
+Appends one `../` to `base` for each slash in `web.ctx.path.lstrip("/")`.
+If the result is empty, returns `./`. The base is a prefix, not a suffix;
+this is string concatenation, not URL normalization. Empty/root paths and
+`/foo` add no parent segment, `/foo/` adds one, and `/foo/bar/` adds two.
 
-**Parameters:**
-- `base`: Base path string to prepend (default: "")
+Each example on this page is self-contained and can run without a server.
+Request-dependent helpers run inside real `application.request` handlers.
 
-**Returns:** Relative path prefix like "../" or "./"
-
-**Example:**
 ```python
-# If current path is /foo/bar/baz
-prefixurl()  # Returns: "../../"
-prefixurl("static/")  # Returns: "../../static/"
+import web
+
+class Page:
+    def GET(self):
+        assert web.prefixurl() == "../../"
+        assert web.prefixurl("static/") == "static/../../"
+        # To put static after the parent segments, concatenate explicitly.
+        return web.prefixurl() + "static/"
+
+app = web.application(("/foo/bar/baz", Page), globals(), autoreload=False)
+response = app.request("/foo/bar/baz")
+assert response.status == "200 OK"
+assert response.data == b"../../static/"
 ```
 
 ### `expires(delta)`
 Sets an HTTP `Expires` header based on a time delta from now. This header tells browsers when the cached content should be considered stale.
 
 **Parameters:**
-- `delta`: A `timedelta` object or number of seconds until expiration
+- `delta`: Integer seconds (`int`) or `datetime.timedelta`. A float such as
+  `1.5` raises `TypeError`; use `timedelta(seconds=1.5)` instead.
 
 **Returns:** None (sets HTTP header)
 
 **Example:**
 ```python
 import datetime
+from email.utils import parsedate_to_datetime
+import web
 
-# Set cache to expire in 1 hour
-expires(3600)
+class Page:
+    def GET(self):
+        web.expires(datetime.timedelta(seconds=1.5))
+        return "cacheable"
 
-# Set cache to expire in 24 hours
-expires(datetime.timedelta(hours=24))
+app = web.application(("/", Page), globals(), autoreload=False)
+before = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=1.5)
+response = app.request("/")
+after = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=1.5)
+assert response.status == "200 OK" and response.data == b"cacheable"
+expires_at = parsedate_to_datetime(response.headers["Expires"])
+# The UTC header has whole-second precision, not fractional seconds.
+assert before.replace(microsecond=0) <= expires_at <= after.replace(microsecond=0)
 ```
+
+Expiration is computed from the current UTC clock. Header formatting drops
+microseconds; fractional timedeltas are accepted but are not transmitted with
+fractional precision. This only sets `Expires`, not a complete cache policy.
 
 ### `lastmodified(date_obj)`
 Sets an HTTP `Last-Modified` header. This header indicates when the resource was last changed, enabling conditional requests.
 
 **Parameters:**
-- `date_obj`: A datetime object representing the last modification time
+- `date_obj`: A datetime representing the last modification time in UTC.
+  Formatting labels its clock fields `GMT` without converting timezones and
+  drops microseconds. Convert aware non-UTC values to UTC first. Use UTC naive
+  datetimes with `modified`, which compares against a parsed naive datetime.
 
 **Returns:** None (sets HTTP header)
 
 **Example:**
 ```python
 import datetime
+import web
 
-# Set last modified date
-lastmodified(datetime.datetime(2023, 1, 1, 12, 0, 0))
+class Page:
+    def GET(self):
+        web.lastmodified(datetime.datetime(2023, 1, 1, 12, 0, 0, 500000))
+        return "document"
+
+app = web.application(("/", Page), globals(), autoreload=False)
+response = app.request("/")
+assert response.status == "200 OK" and response.data == b"document"
+assert response.headers["Last-Modified"] == "Sun, 01 Jan 2023 12:00:00 GMT"
 ```
 
 ### `modified(date=None, etag=None)`
-Handles conditional requests using `Last-Modified` and `ETag` headers. This function implements HTTP caching validation to avoid sending unchanged content.
+Checks request validators against a supplied UTC naive `datetime` and/or an
+unquoted, nonempty ETag string. Returns `True` when **no supplied validator
+proves the resource unchanged**, including absent or nonmatching request
+headers. Generate the normal response after that return; it does not prove
+that the resource changed. A match raises `web.notmodified()` (304), so code
+after the call does not run. Supplied truthy date/ETag values set response
+`Last-Modified`/quoted `ETag` headers on both paths.
 
-When a client makes a request, it may include `If-Modified-Since` and `If-None-Match` headers. This function checks these against the provided `date` and `etag` values:
+This implementation uses **OR semantics**: either matching validator produces
+304 even if the other disagrees. It does not implement ETag-over-date precedence.
+ETags are split on commas with surrounding spaces/quotes stripped; `*` matches
+when an ETag was supplied. Weak `W/` tags are not normalized. Invalid dates are
+ignored. Date matching uses `date - timedelta(seconds=1) <= parsed_request_date`,
+with the request header suffix after `;` ignored. This accommodates subsecond
+precision, but also accepts an exact one-second difference; it is not exact
+datetime equality. These are existing helper semantics, not a complete HTTP
+cache-policy implementation.
 
-- If the resource hasn't been modified, it raises `web.notmodified()` (which sends a 304 response)
-- If the resource has been modified or no validation headers are present, it sets the appropriate response headers and returns `True`
-
-**Parameters:**
-- `date`: Last modification date (datetime object) for `Last-Modified` header
-- `etag`: Entity tag string for `ETag` header (opaque token for version identification)
-
-**Returns:** 
-- `True` if validation passes (resource hasn't been modified)
-- Raises `web.notmodified()` if resource hasn't been modified (client cache is valid)
-
-**Example:**
 ```python
 import datetime
+import web
 
-def GET(self):
-    last_modified = datetime.datetime(2023, 1, 1)
-    etag = "abc123"
-    
-    if modified(date=last_modified, etag=etag):
-        # Resource hasn't been modified, send normal response
-        return render.page()
+generated = []
+class Page:
+    def GET(self):
+        if web.modified(date=datetime.datetime(2023, 1, 1), etag="abc123"):
+            generated.append(True)
+            return "normal response"
+
+app = web.application(("/", Page), globals(), autoreload=False)
+response = app.request("/")
+assert response.status == "200 OK" and response.data == b"normal response"
+cached = app.request("/", headers={"If-None-Match": '"abc123"'})
+assert cached.status == "304 Not Modified" and cached.data == b""
+assert generated == [True]  # The cached request never generated a body.
+assert cached.headers["ETag"] == '"abc123"'
+assert cached.headers["Last-Modified"] == "Sun, 01 Jan 2023 00:00:00 GMT"
 ```
 
 ### `urlencode(query, doseq=False)`
@@ -98,8 +145,10 @@ Encodes a dictionary into a URL-encoded query string, supporting Unicode strings
 
 **Example:**
 ```python
-urlencode({'text': 'foo bar'})  # Returns: 'text=foo+bar'
-urlencode({'x': [1, 2]}, doseq=True)  # Returns: 'x=1&x=2'
+from web.http import urlencode  # Not exported by web.http.__all__.
+
+assert urlencode({'text': 'foo bar'}) == 'text=foo+bar'
+assert urlencode({'x': [1, 2]}, doseq=True) == 'x=1&x=2'
 ```
 
 ### `changequery(query=None, **kw)`
@@ -113,42 +162,120 @@ Creates a new URL with modified query parameters. This is useful for updating UR
 
 **Example:**
 ```python
-# If current URL is /foo?a=1&b=2
-changequery(a=3)  # Returns: '/foo?a=3&b=2'
-changequery(a=None)  # Returns: '/foo?b=2' (removes 'a')
-changequery(page=2, sort='name')  # Returns: '/foo?a=1&b=2&page=2&sort=name'
+import web
+
+class Page:
+    def GET(self):
+        assert web.changequery(a=3) == '/foo?a=3&b=2'
+        assert web.changequery(a=None) == '/foo?b=2'
+        return web.changequery(page=2, sort='name')
+
+app = web.application(('/foo', Page), globals(), autoreload=False)
+response = app.request('/foo?a=1&b=2')
+assert response.status == '200 OK'
+assert response.data == b'/foo?a=1&b=2&page=2&sort=name'
 ```
 
 ### `url(path=None, doseq=False, **kw)`
-Creates a full URL by combining the home path with a given path and optional query parameters.
+Builds a root/mount-relative URL, not an origin-qualified URL. For a path
+starting with `/`, prepends `web.ctx.homepath` (normally `SCRIPT_NAME`, such as
+`""` or `"/mount"`). A relative path is left relative. The default path is
+`web.ctx.path`; current request query parameters are not automatically copied.
+`doseq=True` expands list values into repeated parameters.
 
 **Parameters:**
 - `path`: Path to append (defaults to current path `web.ctx.path`)
 - `doseq`: If True, handles list values in query parameters (default: False)
 - `**kw`: Query parameters to append
 
-**Returns:** Full URL string
+**Returns:** URL path with optional encoded query string.
+
+For an absolute URL from an absolute path, concatenate
+`web.ctx.homedomain + web.url('/path')`. `homedomain` comes from request
+scheme/host; this is not Host validation or a trusted-origin guarantee. Use
+an application-configured trusted origin when that is required.
 
 **Example:**
 ```python
-# If web.ctx.homepath is 'http://example.com'
-url('/api/users')  # Returns: 'http://example.com/api/users'
-url('/api/users', limit=10, offset=20)  # Returns: 'http://example.com/api/users?limit=10&offset=20'
-url(doseq=True, tags=['python', 'web'])  # Returns: 'http://example.com/current?tags=python&tags=web'
+import web
+
+class Page:
+    def GET(self):
+        mount = web.ctx.env['SCRIPT_NAME']
+        assert web.ctx.homepath == mount
+        assert web.ctx.homedomain == 'http://example.com'
+        assert web.url('/api/users', limit=10) == mount + '/api/users?limit=10'
+        assert web.url('relative', limit=10) == 'relative?limit=10'
+        assert web.url(doseq=True, tags=['python', 'web']) == mount + '/current?tags=python&tags=web'
+        return web.ctx.homedomain + web.url('/api/users', limit=10)
+
+app = web.application(('/current', Page), globals(), autoreload=False)
+root = app.request('/current?old=1', host='example.com', env={'SCRIPT_NAME': ''})
+mounted = app.request('/current?old=1', host='example.com', env={'SCRIPT_NAME': '/mount'})
+assert root.status == mounted.status == '200 OK'
+assert root.data == b'http://example.com/api/users?limit=10'
+assert mounted.data == b'http://example.com/mount/api/users?limit=10'
 ```
 
 ### `profiler(app)`
-Wraps a WSGI application with profiling information. This decorator adds profiling output to each response for performance analysis.
+Development-only helper for a bounded, small HTML response. Pass a **WSGI
+callable**, not the non-callable `web.application` instance:
+`app.wsgifunc(web.profiler)` or `web.profiler(app.wsgifunc())`.
+The helper uses `web.utils.Profile` (cProfile), materializes the returned
+iterable into a list, and appends an escaped UTF-8 bytes `<pre>` report. It
+profiles the WSGI callable invocation, **not subsequent body iteration**.
+Deferred generator work may therefore be absent from the timing/report (the
+framework can consume a first chunk during invocation). This is not a streaming
+profiler, end-to-end request timer, or production middleware.
 
-**Parameters:**
-- `app`: WSGI application to profile
+**Caller constraints, not automatic checks:** use only body-bearing HTML
+responses with compatible UTF-8 text, no `Content-Length`, compression,
+body-dependent validators/digests, or other headers invalidated by appending
+bytes. The helper preserves headers unchanged and does not inspect method,
+status or media type. Do not wrap HEAD, 1xx, 204 or 304 responses, redirects,
+JSON, binary downloads, or unbounded streams. It neither forwards an input
+iterable's `close()` nor returns that iterable; do not use it for bodies whose
+resource cleanup depends on explicit close. Successful full iteration of the
+simple web.py response below runs the framework cleanup, but that is not a
+general close guarantee. Keep profiler output away from production clients:
+it exposes internal function/file names and adds overhead.
 
-**Returns:** Wrapped WSGI application that outputs profiling info at the bottom of each response
+The example exercises only the supported development GET/200 HTML case, using
+an in-process WSGI validator, not a server. Installing the wrapper over an
+unrestricted application does **not** enforce the constraints above.
 
-**Example:**
 ```python
-app = web.application(urls, globals())
-app = profiler(app)  # Enable profiling
+import io
+from wsgiref.util import setup_testing_defaults
+from wsgiref.validate import validator
+import web
+
+class Page:
+    def GET(self):
+        web.header("Content-Type", "text/html; charset=utf-8")
+        return "<h1>Development page</h1>"
+
+app = web.application(("/", Page), globals(), autoreload=False)
+wsgi = app.wsgifunc(web.profiler)
+env = {}
+setup_testing_defaults(env)
+env.update(REQUEST_METHOD="GET", PATH_INFO="/", QUERY_STRING="",
+           HTTP_HOST="example.test", **{"wsgi.input": io.BytesIO()})
+captured = []
+def start_response(status, headers, exc_info=None):
+    captured.append((status, headers))
+
+body = validator(wsgi)(env, start_response)
+try:
+    chunks = list(body)
+finally:
+    body.close()
+assert captured == [("200 OK", [("Content-Type", "text/html; charset=utf-8")])]
+assert all(isinstance(chunk, bytes) for chunk in chunks)
+response = b"".join(chunks)
+assert response.startswith(b"<h1>Development page</h1>")
+assert b"<pre>" in response and b"function calls" in response
+assert response.endswith(b"</pre>")
 ```
 
 ## Constants
@@ -169,7 +296,7 @@ This module imports:
 - `datetime` for date/time operations
 - `urllib.parse.urlencode` for URL encoding
 - `web.net` for HTTP date utilities (`httpdate`, `parsehttpdate`)
-- `web.utils` for utility functions (`safestr`)
+- `web.utils` for utility functions (`safestr`, `profile`)
 - `web.webapi` for web context access (`ctx`, `header`, `notmodified`, `rawinput`)
 - `web.py3helpers` for Python 3 compatibility (`iteritems`)
 
@@ -178,55 +305,68 @@ This module imports:
 ### Setting Cache Headers
 ```python
 import datetime
+from email.utils import parsedate_to_datetime
+import web
 
-# Set cache to expire in 1 hour
-expires(3600)
+class Page:
+    def GET(self):
+        web.expires(3600)
+        web.lastmodified(datetime.datetime(2023, 1, 1))
+        return "article"
 
-# Set last modified date
-lastmodified(datetime.datetime.now())
-
-# Combine both for better caching
-expires(3600)
-lastmodified(article.updated_at)
+app = web.application(("/", Page), globals(), autoreload=False)
+before = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+response = app.request("/")
+after = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+assert response.status == "200 OK" and response.data == b"article"
+assert response.headers["Last-Modified"] == "Sun, 01 Jan 2023 00:00:00 GMT"
+assert before.replace(microsecond=0) <= parsedate_to_datetime(response.headers["Expires"]) <= after.replace(microsecond=0)
 ```
 
 ### Handling Conditional Requests
 ```python
 import datetime
+import web
 
-def GET(self):
-    # Get article from database
-    article = db.get_article(id)
-    
-    # Check if page has been modified
-    last_modified = article.updated_at
-    etag = f"article-{article.id}-{article.version}"
-    
-    if modified(date=last_modified, etag=etag):
-        # Page hasn't been modified, return normal content
-        return render.article(article=article)
-    # If modified() returns True, continue with normal processing
-    # If it raises notmodified(), the response is already handled
+class Article:
+    def GET(self):
+        # Substitute your stored update time/version in an application.
+        web.modified(date=datetime.datetime(2023, 1, 1, 0, 0, 0, 500000),
+                     etag="article-1-v2")
+        return "article body"  # Only reached when no validator matched.
+
+app = web.application(("/article", Article), globals(), autoreload=False)
+normal = app.request("/article", headers={"If-None-Match": '"old"'})
+assert normal.status == "200 OK" and normal.data == b"article body"
+# Date matches with subsecond grace, despite the nonmatching ETag (OR).
+cached = app.request("/article", headers={
+    "If-None-Match": '"old"',
+    "If-Modified-Since": "Sun, 01 Jan 2023 00:00:00 GMT",
+})
+assert cached.status == "304 Not Modified" and cached.data == b""
 ```
 
 ### URL Manipulation
 ```python
-# Create a new URL with modified parameters
-new_url = changequery(page=2, sort='name')
+import web
 
-# Build full URLs
-full_url = url('/api/users', limit=10, offset=20)
+class Page:
+    def GET(self):
+        assert web.changequery(page=2) == '/users?filter=active&page=2'
+        # url adds SCRIPT_NAME; changequery uses ctx.path without the mount.
+        assert web.url('/api/users', limit=10) == '/mount/api/users?limit=10'
+        return web.url(page=2)  # Builds a new query, not the old filter.
 
-# Preserve current parameters while adding new ones
-updated_url = changequery(filter='active', order='desc')
+app = web.application(('/users', Page), globals(), autoreload=False)
+response = app.request('/users?filter=active', host='example.com', env={'SCRIPT_NAME': '/mount'})
+assert response.status == '200 OK'
+assert response.data == b'/mount/users?page=2'
 ```
 
 ### URL Encoding
 ```python
-# Simple encoding
-query = urlencode({'search': 'hello world'})
-# Result: 'search=hello+world'
+from web.http import urlencode
 
-# Encoding with sequences
-query = urlencode({'tags': ['python', 'web']}, doseq=True)
-# Result: 'tags=python&tags=web'
+assert urlencode({'search': 'hello world'}) == 'search=hello+world'
+assert urlencode({'tags': ['python', 'web']}, doseq=True) == 'tags=python&tags=web'
+```

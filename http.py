@@ -37,7 +37,7 @@ def prefixurl(base=""):
 def expires(delta):
     """
     Outputs an `Expires` header for `delta` from now.
-    `delta` is a `timedelta` object or a number of seconds.
+    `delta` is a `timedelta` object or an integer number of seconds.
     """
     if isinstance(delta, int):
         delta = datetime.timedelta(seconds=delta)
@@ -64,9 +64,11 @@ def modified(date=None, etag=None):
     send the whole page again.
 
     This function takes the last-modified date `date` and the ETag `etag`
-    and checks the headers to see if they match. If they do, it returns
-    `True`, or otherwise it raises NotModified error. It also sets
-    `Last-Modified` and `ETag` output headers.
+    and checks the request headers. A matching validator raises NotModified;
+    otherwise it returns `True` so normal response generation can continue.
+    It sets the supplied `Last-Modified` and `ETag` output headers in either
+    case. Either validator may match (OR semantics); dates allow one second
+    of grace because HTTP dates have no sub-second precision.
     """
     n = {x.strip('" ') for x in web.ctx.env.get("HTTP_IF_NONE_MATCH", "").split(",")}
     m = net.parsehttpdate(web.ctx.env.get("HTTP_IF_MODIFIED_SINCE", "").split(";")[0])
@@ -148,12 +150,18 @@ def url(path=None, doseq=False, **kw):
 
 
 def profiler(app):
-    """Outputs basic profiling information at the bottom of each response."""
-    from utils import profile
+    """Append a UTF-8 profiling report to a development HTML WSGI response.
+
+    Profiles the callable invocation, not deferred iteration; materializes the
+    body and does not forward its close(). Headers/method/status are unchanged.
+    Callers must restrict use to body-bearing HTML without Content-Length or
+    other body-dependent headers; see docs/http.md for the supported scope.
+    """
+    from .utils import profile
 
     def profile_internal(e, o):
         out, result = profile(app)(e, o)
-        return list(out) + ["<pre>" + net.websafe(result) + "</pre>"]
+        return list(out) + [("<pre>" + net.websafe(result) + "</pre>").encode("utf-8")]
 
     return profile_internal
 
