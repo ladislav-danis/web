@@ -2,14 +2,14 @@
 
 ## Overview
 
-`web.template` is a simple, elegant templating system that compiles templates to Python code for efficient execution. It provides a clean syntax for generating dynamic content while maintaining security through AST-based validation.
+`web.template` is a simple, elegant templating system that compiles templates to Python code for efficient execution. It provides a syntax for generating dynamic content with AST-based restrictions. Treat template source as trusted application code, not as an untrusted-user sandbox; see [Security Features](#security-features) for the boundaries and known assignment-validation defect.
 
 ### Design Principles
 
 - **Template string is split into tokens** and combined into nodes
 - **Parse tree** consists of text nodes, expression nodes, and block nodes (for loops, if statements, etc.)
 - Each node emits Python code strings
-- **Root node** emits Python code that is validated for safe execution and executed in the given environment
+- **Root node** emits Python code that is checked by the AST visitor and executed in the given environment; these checks are not a complete sandbox
 - **Line-to-line matching** between template and generated code for accurate error reporting
 
 ## Template Syntax
@@ -20,12 +20,14 @@ Templates use `$` as the escape character for dynamic content:
 
 | Syntax | Description |
 |--------|-------------|
-| `$varname` | Output variable value (HTML-escaped by default) |
-| `$:varname` | Output variable value without HTML escaping |
-| `$(expression)` | Output expression result (HTML-escaped) |
-| `${expression}` | Output expression result (HTML-escaped, alternative syntax) |
+| `$varname` | Output variable value through the configured filter, if any |
+| `$:varname` | Output variable value without applying the filter |
+| `$(expression)` | Output expression result through the configured filter, if any |
+| `${expression}` | Alternative expression grouping, through the configured filter, if any |
 | `$$` | Literal dollar sign `$` |
 | `$# comment` | Comment (not rendered in output) |
+
+Normal interpolation is HTML-escaped only when an HTML-escaping filter is selected. Literal template markup and `$:` interpolation are not filtered. For a direct HTML `Template`, explicitly use `filename="page.html"` or `filter=web.websafe`; see [HTML Escaping](#html-escaping).
 
 ### Expressions
 
@@ -236,7 +238,7 @@ Represents literal text in the template.
 Represents a dynamic expression in the template.
 
 - `value` - The Python expression
-- `escape` - Whether to HTML-escape the output
+- `escape` - Whether to apply the template filter to this interpolated value (if a filter is configured)
 - `emit(indent)` - Generates code to output the expression
 
 #### `AssignmentNode`
@@ -363,8 +365,8 @@ Template(
 ```
 
 - `text` - Template source text
-- `filename` - Filename for error reporting
-- `filter` - Function to apply to output (e.g., HTML escaping)
+- `filename` - Filename for error reporting and case-sensitive extension selection of the default filter and content type
+- `filter` - Function applied to normal interpolated values, not literal text or `$:` values. A truthy explicit filter overrides the extension default; `None` and `False` fall back to it, so they do not disable escaping for `.html`. See [HTML Escaping](#html-escaping).
 - `globals` - Global variables available to template
 - `builtins` - Built-in functions available to template
 - `extensions` - List of parser extensions
@@ -425,17 +427,19 @@ Extends `Render` to work with GAE's module system.
 
 #### `SafeVisitor`
 
-AST visitor that validates template code for security.
+AST visitor enforcing restrictions on visited template nodes, not an OS or complete Python sandbox.
 
-Checks for:
-- Restricted AST nodes (only nodes in `ALLOWED_AST_NODES` are allowed)
-- Access to restricted attributes (starting with `_`, `func_`, `im_`)
-- Assignment to attributes
-- Access to names starting with `__`
+Checks include:
+- Restricted AST node types (`ALLOWED_AST_NODES`)
+- Restricted attribute prefixes (`_`, `func_`, `im_`)
+- Direct attribute assignment targets
+- Names starting with `__`
+
+**Known defect:** augmented attribute assignment and tuple-unpacked attribute targets pass validation and can mutate supplied objects. The augmented-assignment visitor also omits normal child traversal. These restrictions are therefore not universal guarantees; see [AST Validation](#ast-validation).
 
 ##### Methods
 
-- `walk(tree, filename)` - Validates the AST and raises `SecurityError` if unsafe
+- `walk(tree, filename)` - Visits the AST and raises `SecurityError` for detected violations; acceptance is not proof that execution is safe
 - `fail_node(node, nodename)` - Reports an unsafe node
 - `fail_attribute(node, attrname)` - Reports unsafe attribute access
 - `fail_name(node)` - Reports unsafe name access
@@ -541,6 +545,12 @@ List of allowed AST node types for security validation.
 
 ## Usage Examples
 
+The HTML example below that assigns `html = template(...)` and the self-contained
+examples in [Security Features](#security-features) are executable security
+contracts. Other legacy usage/syntax fragments on this page remain incomplete
+or unverified (tracked separately in web#15); do not treat them as validated
+standalone recipes or infer HTML escaping from them.
+
 ### Basic Template
 
 ```python
@@ -554,8 +564,10 @@ print(result)  # Hello World!
 ### Template with Variables
 
 ```python
-template = Template("""
-$def with (title, items)
+from web.template import Template
+
+# The argument declaration must be the first line of the template string.
+template = Template("""$def with (title, items)
 <html>
 <head><title>$title</title></head>
 <body>
@@ -563,9 +575,11 @@ $for item in items:
     <p>$item</p>
 </body>
 </html>
-""")
+""", filename="page.html")
 
 html = template(title="My Page", items=["Item 1", "Item 2"])
+assert "<title>My Page</title>" in str(html)
+assert "<p>Item 1</p>" in str(html)
 ```
 
 ### Template with Control Structures
@@ -677,30 +691,121 @@ $end
 
 ### AST Validation
 
-Templates are validated using AST walking to prevent unsafe operations:
+Template construction compiles generated Python and applies `SafeVisitor`.
+Ordinary visited expressions reject restricted names/attributes and disallowed
+node types (for example, an `import` statement). A direct attribute target such
+as `a.x = 3` is rejected with `SecurityError` at construction time.
 
-- Only predefined AST nodes are allowed
-- Access to attributes starting with `_` is denied
-- Assignment to attributes is denied
-- Access to names starting with `__` is denied
+**This revision does not enforce a complete ban on attribute writes.**
+`a.x += 1` and `(a.x, y) = (2, 3)` compile and mutate the supplied object when
+rendered; nested tuple targets also pass. `visit_AugAssign` checks the statement
+node instead of its target and does not visit its children; assignment-target
+checking does not recurse into tuples. This is an unresolved source security
+defect, not supported safe mutation or a runtime fix in this documentation.
+A separate source-hardening issue must track rejection of these writes and
+preservation of the existing restrictions before web#14 can be closed.
+
+This harmless example uses only newly created objects, not application state:
+
+```python
+from types import SimpleNamespace
+from web.template import Template, SecurityError
+
+box = SimpleNamespace(x=1)
+try:
+    Template("$def with(a)\n$code:\n    a.x = 3\n$a.x")
+except SecurityError:
+    pass
+else:
+    raise AssertionError("Direct attribute assignment must be rejected")
+assert box.x == 1
+
+# Characterizations of an unresolved defect, not recommended template code.
+for statement, expected in [("a.x += 1", 2), ("(a.x, y) = (2, 3)", 2)]:
+    owned = SimpleNamespace(x=1)
+    template = Template("$def with(a)\n$code:\n    " + statement + "\n$a.x")
+    assert owned.x == 1
+    assert str(template(owned)) == str(expected) + "\n"
+    assert owned.x == expected
+```
+
+Treat templates as **trusted application code**. Objects, globals and callables
+passed to them confer application capabilities, including side effects through
+ordinary allowed method/function calls. Even complete assignment validation
+would not isolate files, processes, network access or resource consumption of
+those callables. Do not compile or render untrusted user-authored templates.
 
 ### Safe Built-ins
 
-Templates have access to a restricted set of built-in functions, preventing access to potentially dangerous functions.
+The default environment exposes a restricted built-in mapping. This reduces available names but is not a security boundary for untrusted templates or supplied callables. Application-provided globals, arguments and custom builtins affect capabilities. The legacy builtins list above is part of the separate web#15 reference audit, not a verified security allowlist.
 
 ### HTML Escaping
 
-By default, all output is HTML-escaped to prevent XSS attacks. Use `$:var` to output unescaped content when needed.
+Escaping depends on the **case-sensitive filename extension**, not on whether
+the template string contains HTML. `Render(directory)` uses the filename of the
+actual file it loads; direct `Template(text)` defaults to `"<template>"`.
+
+| Filename extension | Default interpolation filter | Content type mapping |
+| --- | --- | --- |
+| `.html` | `web.websafe` | `text/html; charset=utf-8` |
+| `.xhtml` | `web.websafe` | `application/xhtml+xml; charset=utf-8` |
+| `.xml` | `web.websafe` | None (no XML entry in `CONTENT_TYPES`) |
+| `.txt` | None | `text/plain` |
+| No extension, unknown extension, `.HTML`, or `"<template>"` | None | None |
+
+A truthy explicit `filter` overrides the extension default. `filter=None` and
+`filter=False` fall back to that default; they do **not** disable HTML escaping.
+Filter selection and content-type selection are separate decisions.
+
+Normal `$value`, `$(expression)` and `${expression}` interpolations convert `None` to an empty
+string and other values to Unicode, then call the selected filter if any.
+`${expression}` is converted to parenthesized grouping by the expression node.
+Literal template markup is unchanged. `$:value` still converts the
+value to text but bypasses the filter entirely, so use it only for deliberately
+trusted markup, not untrusted input.
+
+`web.websafe` escapes HTML metacharacters for text and ordinary quoted HTML
+attributes. It is not JavaScript/CSS escaping, URL-scheme validation, HTML
+sanitization, or blanket XSS prevention. Choose context-appropriate handling;
+filtering an interpolation does not make arbitrary template markup safe.
+
+This standalone example uses real files only in an owned temporary directory:
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import web
+from web.template import Template, Render
+
+source = '$def with(value)\n<p title="$value">$(value)</p>|$:value'
+value = "<b>&\"'"
+escaped = "&lt;b&gt;&amp;&quot;&#39;"
+filtered = '<p title="' + escaped + '">' + escaped + '</p>|' + value + '\n'
+unfiltered = '<p title="' + value + '">' + value + '</p>|' + value + '\n'
+assert str(Template(source)(value)) == unfiltered
+assert str(Template(source, filename="page.html")(value)) == filtered
+assert str(Template(source, filter=web.websafe)(value)) == filtered
+assert str(Template(source, filename="page.html", filter=False)(value)) == filtered
+
+with TemporaryDirectory() as directory:
+    root = Path(directory)
+    (root / "page.html").write_text(source, encoding="utf-8")
+    (root / "plain.txt").write_text(source, encoding="utf-8")
+    render = Render(str(root), cache=False)
+    assert str(render.page(value)) == filtered
+    assert str(render.plain(value)) == unfiltered
+assert not root.exists()
+```
 
 ## Template Syntax Reference
 
 ### Variables
 
 ```python
-$name              # Output variable (escaped)
-$:name             # Output variable (unescaped)
-${name}            # Output variable (escaped, alternative syntax)
-$(expression)      # Output expression (escaped)
+$name              # Variable through selected filter, if any
+$:name             # Variable bypassing filter
+${name}            # Alternative grouping through selected filter, if any
+$(expression)      # Grouped expression through selected filter, if any
 ```
 
 ### Expressions
