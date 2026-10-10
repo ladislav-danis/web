@@ -14,6 +14,40 @@
 
 ## Template Syntax
 
+Fences beginning with `$` are **template fragments**, not Python programs.
+Compile their exact text with `Template`, supplying the sample data below as
+`globals` unless the fragment declares arguments. Inline `#` annotations on
+ordinary output lines are literal template text; `$#` starts a template comment.
+Blank lines within an indented block are part of that block's output.
+
+Fragment sample data used by the executable reference tests:
+
+| Fragment | Explicit sample data / call |
+| --- | --- |
+| Syntax Expressions | `varname="V"`, object with `attribute="A"` and `method()` returning an object with `attr="M"`, `list=["L"]`, `func` summing its positional numbers, `x=1`, `y=2`, `items=["a", "b"]` |
+| If Statements | `condition=False`, `other_condition=True` |
+| For Loops | `items=["a", "b"]` |
+| While Loops | `condition=False` (zero-iteration syntax smoke only; a real repeating loop must make progress toward termination) |
+| Assignments (both) | `value=7` |
+| Function Definitions | `default="B"`, call with `"A"` |
+| Variables Declaration | `value=7`; the second declaration overwrites the result attribute |
+| Structure: Basic Template | call with `"Ada"` |
+| Structure: Template with Control Structures | call with `["a", "b"]` |
+| Structure: Template with Variables | no input |
+| Reference: Variables | declared `name` and `expression`, both `"<b>"`; test with an HTML filename/filter |
+| Reference: Expressions | function summing its positional numbers, `obj.attr="A"`, `list=["L"]`, `dict={"key": "D"}`, `items=["a", "b"]` |
+| Reference: Control Structures | `condition=False`, `items=["a", "b"]`; the while arm is not entered |
+| Comments | no input |
+| `$def with (...)` directive | call with `"Ada"`, leaving `age=25` |
+| `$var name: value` directive | no input |
+| Simple-statement directive | `items=iter([None, "stop", "after"])`; break leaves `"after"` unconsumed |
+
+Python recipes below include their own imports and owned sample files. Constructor
+fences and the `STATEMENT_NODES` class-name table are **signature/reference only**,
+not standalone recipes. The candidate-name list is a literal reference checked
+against the actual constant. The diagnostic doctest runner intentionally returns
+nonzero for the historical failures described there.
+
 ### Basic Syntax
 
 Templates use `$` as the escape character for dynamic content:
@@ -81,6 +115,14 @@ Loop helpers (available inside for loops):
 - `loop.revindex0` - Reverse index (0-based from end)
 - `loop.parent` - Reference to parent loop context
 
+`length`, `last`, `revindex` and `revindex0` need a sized input (`len(seq)`).
+When `len` raises, the current implementation uses `length=0`, not lookahead:
+for a two-item iterator `last` is `False, False`, `revindex` is `0, -1`, and
+`revindex0` is `-1, -2`. Forward indices, first/parity helpers still work.
+Materialize a finite iterator with `list(...)` before passing it when reverse/end
+information is required; this consumes the iterator and uses memory proportional
+to its size. `enumerate(items)` is also unsized on Python 3.
+
 #### While Loops
 
 ```python
@@ -90,27 +132,46 @@ $while condition:
 
 #### Code Blocks
 
+`$code:` supports local calculations and function definitions, but imports in
+trusted template source are still rejected by `SafeVisitor`. Import in application
+Python and pass a deliberately selected callable through `globals` or an argument.
+Such callables retain their application capabilities; this is not a sandbox.
+
 ```python
-$code:
-    # Python code that doesn't produce output
-    # Useful for imports, function definitions, etc.
-    import os
+from math import sqrt
+from web.template import Template
+
+template = Template("""$code:
     def helper(x):
-        return x * 2
+        return root(x) * 2
+$helper(9)
+""", globals={"root": sqrt})
+result = template()
+assert str(result) == "6.0\n"
 ```
 
 ### Assignments
 
+Template fragment; sample global: `value=7`. The space after `$` makes a
+local Python assignment. `$var a:` instead stores multiline text on the result;
+inside the template read it as `self.a` (outside as `result.a`).
+
 ```python
-$a = value                    # Simple assignment
-$a:                           # Multi-line assignment
-    content that becomes the value
+$ a = value
+$a
+$var a:
+    content
+$self.a
 ```
 
 ### Function Definitions
 
+The argument declaration must be the very first line, with **no final colon**.
+This template fragment uses the sample global `default="B"`; call with `"A"`
+for `arg1`. Indentation in ordinary text is preserved.
+
 ```python
-$def with (arg1, arg2=default):
+$def with (arg1, arg2=default)
     template content using $arg1 and $arg2
 ```
 
@@ -146,8 +207,8 @@ $for item in items:
 $var title: My Page
 $var content: Welcome
 
-<h1>$:title</h1>
-$:content
+<h1>$self.title</h1>
+$self.content
 ```
 
 ## Classes
@@ -164,11 +225,13 @@ Parses template text and returns a `DefwithNode` representing the parse tree.
 
 ##### `read_defwith(text)`
 
-Reads the `$def with` declaration from the beginning of the text.
+Returns `(declaration, remaining_text)` from the beginning of the text. The
+declaration omits `$` and is stripped; if absent it is `""` and text is unchanged.
 
 ##### `read_section(text)`
 
-Reads one section from the text. Sections can be blocks, assignments, or lines.
+Returns `(section_node, remaining_text)`. Sections can be blocks, assignments,
+variable declarations, simple statements or lines.
 
 ##### `read_suite(text)`
 
@@ -176,27 +239,42 @@ Reads multiple sections until end of text, returning a `SuiteNode`.
 
 ##### `readline(text)`
 
-Reads one line from the text, handling line continuation with `\`.
+Returns `(LineNode, remaining_text)`. A terminal `\` suppresses that line's
+output newline; the remaining input is returned separately, not joined to it.
 
 ##### `read_node(text)`
 
-Reads a single node (text or expression) from the text.
+Returns `(node, remaining_text)` for a text or expression node.
 
 ##### `read_text(text)`
 
-Reads a text node from the text.
+Returns `(TextNode, remaining_text)`, stopping before the next `$`.
 
 ##### `read_expr(text, escape=True)`
 
-Reads a Python expression and returns an `ExpressionNode`.
+Returns `(ExpressionNode, remaining_text)`, **not** a node alone. Pass text
+after the `$` marker; the parser need not consume the whole input.
+
+```python
+from web.template import Parser, ExpressionNode
+
+node, rest = Parser().read_expr("name and rest", escape=False)
+assert isinstance(node, ExpressionNode)
+assert node.value == "name" and node.escape is False
+assert rest == " and rest"
+```
 
 ##### `read_assignment(text)`
 
-Reads an assignment statement.
+Returns `(AssignmentNode, remaining_text)`; pass the assignment after `$`.
 
 ##### `read_block_section(text, begin_indent="")`
 
-Reads a block section (for, if, while, etc.) with proper indentation handling.
+Returns `(block_node, remaining_text)` with indentation handling; pass the
+statement after `$`. The class depends on the keyword (for example `IfNode`).
+Related consumers: `read_var` returns `(VarNode, rest)`, `read_keyword` returns
+`(StatementNode, rest)`, and `read_statement` / `read_indented_block` return two
+strings. In contrast, `read_suite` consumes all input and returns just `SuiteNode`.
 
 ##### `create_block_node(keyword, stmt, block, begin_indent)`
 
@@ -313,7 +391,9 @@ Represents a suite (sequence) of sections.
 
 #### `ForLoop`
 
-Wrapper for for loop expressions to support `loop.xxx` helpers.
+Wrapper for for loop expressions; proxies attributes of the active
+`ForLoopContext`. After normal exhaustion of the outer loop, helper access
+raises `AttributeError`. Nested, normally exhausted loops restore their parent.
 
 - `setup(seq)` - Sets up iteration over a sequence
 - `index` - Current iteration number (1-based)
@@ -332,7 +412,12 @@ Stackable context for nested for loops.
 
 - `setup(seq)` - Sets up iteration
 - `parent` - Reference to parent loop context
-- `length` - Length of the sequence
+- `length` - `len(seq)`, or `0` when obtaining the length raises; **not** a count of yielded elements
+
+See the [sized/unsized limitation](#for-loops) for `last` and reverse indices.
+The outermost context has `parent=None`; nested contexts refer to the actual
+outer context. These descriptions concern normal exhaustion, not a guarantee
+of cleanup after an interrupted iterator.
 
 #### `BaseTemplate`
 
@@ -374,9 +459,39 @@ Template(
 ##### Methods
 
 - `__call__(*a, **kw)` - Executes the template with arguments
-- `normalize_text(text)` - Normalizes template text (handles line endings, BOM)
+- `normalize_text(text)` - Normalizes CRLF/CR to LF, expands tabs, appends a missing final newline, converts legacy `\$` to `$$`, and strips only the leading legacy string `"\xef\xbb\xbf"` (not Unicode U+FEFF)
 - `generate_code(text, filename, parser=None)` - Generates Python code from template
 - `compile_template(template_string, filename)` - Compiles template to executable code
+
+##### Text normalization and UTF-8 BOM
+
+**Pinned limitation, not fixed here:** a real Unicode BOM (`U+FEFF`) remains in
+the text. `Render` reads files with `encoding="utf-8"`, so a UTF-8 BOM becomes
+U+FEFF, can appear in rendered output, and prevents an initial `$def with` from
+being recognized (a BOM-prefixed argument declaration raises `SyntaxError`).
+The removed three-character legacy string is a mojibake sequence, not U+FEFF.
+Prefer UTF-8 templates saved **without** a BOM. When explicitly loading a file
+in application Python, `utf-8-sig` is a bounded workaround, not a Render fix:
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from web.template import Template, Render
+
+assert Template.normalize_text("\ufeffHello") == "\ufeffHello\n"
+assert Template.normalize_text("\xef\xbb\xbfHello") == "Hello\n"
+with TemporaryDirectory() as directory:
+    root = Path(directory)
+    path = root / "hello.txt"
+    path.write_bytes(b"\xef\xbb\xbfHello")
+    assert str(Render(directory, cache=False).hello()) == "\ufeffHello\n"
+    clean = Template(path.read_text(encoding="utf-8-sig"))
+    assert str(clean()) == "Hello\n"
+    path.write_bytes(b"\xef\xbb\xbf$def with (name)\nHello $name!")
+    clean = Template(path.read_text(encoding="utf-8-sig"))
+    assert str(clean("World")) == "Hello World!\n"
+assert not root.exists()
+```
 
 ##### Class Attributes
 
@@ -463,7 +578,7 @@ The template result stores output in `__body__` and additional attributes separa
 - `__delattr__(key)` - Deletes a value as an attribute
 - `__str__()` / `__unicode__()` - Returns the body content
 - `__repr__()` - Returns a string representation
-- `__len()` - Returns the number of attributes
+- `__len__()` - Returns the number of mapping items, including `__body__` (not the body character count); a new result has length 1
 - `__iter__()` - Iterates over keys
 
 ### Functions
@@ -473,9 +588,11 @@ The template result stores output in `__body__` and additional attributes separa
 Splits text at the first newline.
 
 ```python
-splitline('foo\nbar')  # ('foo\n', 'bar')
-splitline('foo')       # ('foo', '')
-splitline('')          # ('', '')
+from web.template import splitline
+
+assert splitline('foo\nbar') == ('foo\n', 'bar')
+assert splitline('foo') == ('foo', '')
+assert splitline('') == ('', '')
 ```
 
 #### `compile_templates(root)`
@@ -489,13 +606,50 @@ Creates `__init__.py` files with compiled templates for faster loading.
 Creates a template from a file path.
 
 ```python
-template = frender('path/to/template.html')
-print(template())
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from web.template import frender
+
+with TemporaryDirectory() as directory:
+    root = Path(directory)
+    path = root / 'page.html'
+    path.write_text('$def with (name)\n<p>$name</p>', encoding='utf-8')
+    template = frender(str(path))
+    assert str(template('<World>')) == '<p>&lt;World&gt;</p>\n'
+assert not root.exists()
 ```
 
 #### `test()`
 
-Runs doctests for the template module.
+`web.template.test()` is a no-op function returning `None`; its **docstring**
+contains examples, but calling it runs none of them. To run only this module's
+doctests and give automation a nonzero exit when they fail, save and run this
+standalone Python program (with this checkout importable):
+
+```python
+import doctest
+import importlib
+
+module = importlib.import_module("web.template")
+result = doctest.testmod(module)
+print(result)
+raise SystemExit(1 if result.failed else 0)
+```
+
+This is a diagnostic runner, **not a green quickstart**. On the tested Python
+3.13 snapshot it attempts 124 examples and reports 60 failures (exit 1).
+Historical expected `u'...'` representations, the `TestResult.__repr__` helper
+returning body text rather than `repr(body)`, old exception wording, and the
+malformed `python_lookahead('else:')` expected text need separate source-doctest
+maintenance. `TemplateResult` and `read_var` repr expectations are also stale.
+There is additionally a real `date.strftime(...)` failure (`KeyError:
+'__import__'`) under the restricted mapping, and a historical `\$` literal emits
+`SyntaxWarning`; the runner preserves both diagnostics. Format dates in trusted
+application Python and pass the resulting text rather than adding `__import__`
+to template builtins. This limitation needs separate source investigation.
+Do not treat these failures as repaired here or run unrelated database doctests.
+The module's `__main__` calls `doctest.testmod()` without propagating its result
+as the process exit code; prefer the explicit exit check above for automation.
 
 ### Constants
 
@@ -521,23 +675,30 @@ List of simple keywords: `["pass", "break", "continue", "return"]`
 
 #### `TEMPLATE_BUILTIN_NAMES`
 
-List of built-in names available in templates:
+Legacy candidate-name list, **not** the runtime allowlist. The constant contains:
 
 ```python
 [
     "dict", "enumerate", "float", "int", "bool",
-    "list", "reversed", "set", "slice", "tuple",
+    "list", "long", "reversed", "set", "slice", "tuple", "xrange",
     "abs", "all", "any", "callable", "chr", "cmp",
     "divmod", "filter", "hex", "id", "isinstance",
     "iter", "len", "max", "min", "oct", "ord",
     "pow", "range", "round", "True", "False", "None",
-    "__import__"
 ]
 ```
 
 #### `TEMPLATE_BUILTINS`
 
-Dictionary of built-in functions available in templates.
+Actual default mapping: candidates present in the interpreter's `builtins`.
+On the tested Python 3 runtime, `long`, `xrange` and `cmp` are absent; use
+`int` and `range` instead of the Python 2 names. `__import__` is in neither
+constant, and ordinary dunder-name expressions are rejected by `SafeVisitor`.
+`True`, `False` and `None` are constants, not functions. Names such as `str` and
+`sorted` are not in this default mapping either: pass required trusted helpers
+explicitly via `globals`/arguments. `builtins={}` replaces the default mapping.
+This is Python 3 characterization, not a claim of Python 2 support or a complete
+security boundary; see [Security Features](#security-features).
 
 #### `ALLOWED_AST_NODES`
 
@@ -545,18 +706,19 @@ List of allowed AST node types for security validation.
 
 ## Usage Examples
 
-The HTML example below that assigns `html = template(...)` and the self-contained
-examples in [Security Features](#security-features) are executable security
-contracts. Other legacy usage/syntax fragments on this page remain incomplete
-or unverified (tracked separately in web#15); do not treat them as validated
-standalone recipes or infer HTML escaping from them.
+The standalone Python recipes below and in [Security Features](#security-features)
+are executed from their Markdown bytes. Syntax fragments use the explicit sample
+data listed above; constructor signatures and class-name reference tables are not
+standalone programs. Runtime characterizations of restricted builtins, unsized
+loops, BOM handling and historical doctest failures are not runtime repairs.
+Never infer HTML escaping from HTML-shaped text; select the appropriate filter.
 
 ### Basic Template
 
 ```python
 from web.template import Template
 
-template = Template("Hello $name!")
+template = Template("$def with (name)\nHello $name!")
 result = template(name="World")
 print(result)  # Hello World!
 ```
@@ -585,8 +747,10 @@ assert "<p>Item 1</p>" in str(html)
 ### Template with Control Structures
 
 ```python
-template = Template("""
-$def with (user, items)
+from types import SimpleNamespace
+from web.template import Template
+
+template = Template("""$def with (user, items)
 $if user:
     <h1>Welcome, $user.name!</h1>
 $else:
@@ -599,35 +763,58 @@ $if items:
     </ul>
 $else:
     <p>No items available</p>
-""")
+""", filename="page.html")
+result = template(SimpleNamespace(name="Ada"), ["one"])
+assert "<h1>Welcome, Ada!</h1>" in str(result)
+assert "<h1>Welcome, Guest</h1>" in str(template(None, []))
 ```
 
 ### Rendering from Directory
 
+The directory and sample files are created here; no preexisting project is
+required. Real applications normally keep their trusted template files in source
+control rather than rebuilding the directory per render.
+
 ```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from web.template import Render
 
-render = Render('templates')
-
-# Render templates from the templates directory
-print(render.index())
-print(render.page(name="About"))
+with TemporaryDirectory() as directory:
+    root = Path(directory)
+    (root / 'index.html').write_text('Welcome', encoding='utf-8')
+    (root / 'page.html').write_text('$def with (name)\n<h1>$name</h1>', encoding='utf-8')
+    render = Render(directory, cache=False)
+    assert str(render.index()) == 'Welcome\n'
+    assert str(render.page(name='About')) == '<h1>About</h1>\n'
+assert not root.exists()
 ```
 
 ### Using Base Templates
 
 ```python
-render = Render('templates', base='layout')
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from web.template import Render
 
-# All templates will be wrapped with layout.html
-print(render.page())  # Uses layout.html as base
+with TemporaryDirectory() as directory:
+    root = Path(directory)
+    (root / 'layout.html').write_text('$def with (page)\n<main>$:page</main>', encoding='utf-8')
+    (root / 'page.html').write_text('<p>About</p>', encoding='utf-8')
+    render = Render(directory, base='layout', cache=False)
+    assert str(render.page()) == '<main><p>About</p>\n</main>\n'
+assert not root.exists()
 ```
+
+The base receives the rendered `TemplateResult`. `$:page` deliberately inserts
+trusted markup from the inner template; it must not be arbitrary untrusted HTML.
 
 ### Template with Functions
 
 ```python
-template = Template("""
-$def with (items)
+from web.template import Template
+
+template = Template("""$def with (items)
 $def format_item(item):
     <strong>$item</strong>
 
@@ -635,22 +822,26 @@ $def format_item(item):
 $for item in items:
     <li>$:format_item(item)</li>
 </ul>
-""")
+""", filename="page.html")
+result = template(["one", "<two>"])
+assert "<strong>&lt;two&gt;</strong>" in str(result)
 ```
 
 ### Template with Variables
 
 ```python
+from web.template import Template
+
 template = Template("""
 $var title: My Website
 $var author: John Doe
 
 <html>
 <head>
-    <title>$:title</title>
+    <title>$self.title</title>
 </head>
 <body>
-    <p>By $:author</p>
+    <p>By $self.author</p>
 </body>
 </html>
 """)
@@ -660,9 +851,18 @@ print(result.title)   # My Website
 print(result.author)  # John Doe
 ```
 
+`$var` stores result attributes, not Python locals: use `self.title` and
+`self.author` inside the template and `result.title` / `result.author` afterward.
+For dynamic HTML values select an HTML filename/filter; plain `Template` here
+has no default HTML filter.
+
 ### Using Loop Helpers
 
+`range(5)` is sized on Python 3, so end/reverse helpers have useful values.
+
 ```python
+from web.template import Template
+
 template = Template("""
 $for i in range(5):
     Index: $loop.index
@@ -672,19 +872,26 @@ $for i in range(5):
     Parity: $loop.parity
     <br>
 """)
+result = template()
+assert str(result).count("Last: True") == 1
 ```
 
 ### Nested Loops
 
+Blocks end by dedenting, not with `$end` (which would interpolate an ordinary
+name `end`). Declare both input sequences; `loop.parent` is the outer context.
+
 ```python
-template = Template("""
+from web.template import Template
+
+template = Template("""$def with (rows, cols)
 $for row in rows:
     Row $loop.index
     $for col in cols:
         Column $loop.index (parent: $loop.parent.index)
-    $end
-$end
 """)
+result = template(["r1", "r2"], ["c1", "c2"])
+assert "Column 2 (parent: 2)" in str(result)
 ```
 
 ## Security Features
@@ -702,8 +909,9 @@ rendered; nested tuple targets also pass. `visit_AugAssign` checks the statement
 node instead of its target and does not visit its children; assignment-target
 checking does not recurse into tuples. This is an unresolved source security
 defect, not supported safe mutation or a runtime fix in this documentation.
-A separate source-hardening issue must track rejection of these writes and
-preservation of the existing restrictions before web#14 can be closed.
+Source hardening is tracked separately in
+[web#30](https://git.home.arpa/mosaic-ai/web/issues/30); rejection of these writes
+and preservation of the existing restrictions are not implemented here.
 
 This harmless example uses only newly created objects, not application state:
 
@@ -737,7 +945,10 @@ those callables. Do not compile or render untrusted user-authored templates.
 
 ### Safe Built-ins
 
-The default environment exposes a restricted built-in mapping. This reduces available names but is not a security boundary for untrusted templates or supplied callables. Application-provided globals, arguments and custom builtins affect capabilities. The legacy builtins list above is part of the separate web#15 reference audit, not a verified security allowlist.
+The default environment exposes the runtime [TEMPLATE_BUILTINS](#template_builtins)
+mapping, not every legacy candidate name. This reduces available names but is not
+a security boundary for untrusted templates or supplied callables.
+Application-provided globals, arguments and custom builtins affect capabilities.
 
 ### HTML Escaping
 
@@ -836,10 +1047,15 @@ $code:
 
 ### Assignments
 
+Template fragment; sample global: `value=7`. Local assignment and multiline
+result attributes are different operations:
+
 ```python
-$a = value         # Simple assignment
-$a:                # Multi-line assignment
+$ a = value
+$a
+$var a:
     content
+$self.a
 ```
 
 ### Comments
@@ -870,13 +1086,21 @@ $var content: Welcome
 
 ### `$code:`
 
-Defines Python code that doesn't produce output.
+Defines Python code that doesn't directly produce template output. Imports belong
+in application Python, not inside `$code:`. Here the trusted function is an argument:
 
 ```python
+from math import sqrt
+from web.template import Template
+
+template = Template("""$def with (root)
 $code:
-    import os
     def helper(x):
-        return x * 2
+        return root(x) * 2
+$helper(9)
+""")
+result = template(sqrt)
+assert str(result) == "6.0\n"
 ```
 
 ### `$pass`, `$break`, `$continue`, `$return`
@@ -889,3 +1113,4 @@ $for item in items:
         $pass
     $if item == 'stop':
         $break
+```
