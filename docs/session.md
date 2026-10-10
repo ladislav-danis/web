@@ -24,21 +24,23 @@ The examples use `os.environ["SESSION_SECRET_KEY"]` to fail on a missing variabl
 operators must also reject empty/weak values. Changing global configuration later
 does not update an existing Session's copied configuration.
 
-Only fences marked `# Executable:` are standalone offline examples. Run them with
+Only fences marked `# Executable:` or `# Executable usage:` are standalone offline examples. Run them with
 the provisioned environment variable; disk/SQLite/shelf demos own temporary paths
 and clean them up, so they are not persistent deployment stores. A deployed store
 needs an application-owned protected path and lifecycle instead. Signatures, data
 shapes and handler fragments are reference material, not standalone programs.
-The expiration and broad API reference fragments remain outside this security
-repair (web issue #13); they are not verified working recipes. This page's security
-examples do not certify the remaining thread-safety, ID-generation or Python-version
-claims tracked by that separate issue.
+The usage examples below exercise real offline requests, not authentication.
+Unchanged runtime limitations (missing-record expiry, direct iteration and shared
+MemoryStore interleavings) are called out separately; passing examples do not fix them.
+Signatures and data-shape fences remain non-executable reference material.
 
 ## Classes
 
 ### `SessionExpired`
 
-Exception raised when a session has expired. This is a subclass of `web.HTTPError` and returns a 200 OK response with the expired message as data.
+An expiry exception derived from `web.HTTPError`, with status `200 OK` and the
+configured expired message as data. Not every expiry path reaches this exception:
+see the [missing-record limitation and outer-processor example](#session-expiration-handling).
 
 #### Constructor
 ```python
@@ -48,18 +50,16 @@ def __init__(self, message)
 **Parameters:**
 - `message` (str): Error message to display when session expires
 
-**Example:**
-```python
-try:
-    # Session operations
-    pass
-except session.SessionExpired as e:
-    return e.data  # Returns "Session expired"
-```
+Catch this exception in an outer application processor registered **before**
+constructing `Session`, not around operations inside GET; see the executable
+[expiration example](#session-expiration-handling).
 
 ### `Session`
 
-Main session class that manages user sessions. It automatically loads session data on request and saves it after the handler completes.
+Main session class that manages request session data. Its processor calls cleanup
+and load **before** entering the handler try/finally; after a successful load it
+saves in finally, even when the handler raises. A load/cleanup failure bypasses
+that finally block (although `expired()` itself attempts a save).
 
 #### Constructor
 ```python
@@ -89,25 +89,26 @@ with TemporaryDirectory() as root:
 ```
 
 #### Special Methods
-- `__contains__(self, name)`: Check if session contains a key (`key in session`)
-- `__getattr__(self, name)`: Get attribute from session data (`session.key`)
-- `__setattr__(self, name, value)`: Set attribute on session data (`session.key = value`)
-- `__delattr__(self, name)`: Delete attribute from session data (`del session.key`)
-- `__getitem__(self, name)`: Get item from session data (`session['key']`)
-- `__setitem__(self, name, value)`: Set item in session data (`session['key'] = value`)
-- `__delitem__(self, name)`: Delete item from session data (`del session['key']`)
+- `__contains__(self, name)`: Check if session contains a key (`key in sess`)
+- `__getattr__(self, name)`: Get attribute from session data (`sess.key`)
+- `__setattr__(self, name, value)`: Set attribute on session data (`sess.key = value`)
+- `__delattr__(self, name)`: Delete attribute from session data (`del sess.key`)
+- `__getitem__(self, name)`: Get item from session data (`sess['key']`)
+- `__setitem__(self, name, value)`: Set item in session data (`sess['key'] = value`)
+- `__delitem__(self, name)`: Delete item from session data (`del sess['key']`)
 
 #### Public Methods
 
 ##### `kill()`
 Kill (delete) the current session and mark it as expired.
 
-**Example:**
+**Handler fragment (requires the configured `sess` instance):**
 ```python
 def POST(self):
-    session.kill()
+    sess.kill()
     raise web.seeother('/login')
 ```
+For an executable request/store example see [Session Kill](#session-kill-logout).
 
 #### Internal Methods (for reference)
 
@@ -331,8 +332,14 @@ d_store = {
 - `cleanup(self, timeout)`: Remove sessions older than timeout
 
 **Features:**
-- Thread-safe access via the underlying dict
 - Automatic timestamp updates on access
+- No lock around read + timestamp write or cleanup. A concurrent update can be
+  overwritten by a reader; cleanup iterates the live dict and then deletes selected
+  keys, so concurrent mutation can raise `RuntimeError` or remove a refreshed row.
+  Request-local `Session` data is not shared-store synchronization. Coordinate
+  shared access separately; this store provides no transactional/concurrent-session
+  update guarantee. These are bounded deterministic interleaving characterizations,
+  not a throughput or stress-test certification.
 
 ### `ShelfStore`
 
@@ -581,36 +588,77 @@ assert second.open('/').read() == b'Count: 1'
 
 ### Session Expiration Handling
 
-**Unverified reference fragment, pending web issue #13, not an executable recipe.**
-The authentication placeholder and module/instance usage below remain incomplete.
-A handler-level catch is too late for errors while the session processor loads
-before the handler. Do not infer working expiry handling from this fragment.
+`Session._processor` calls cleanup and load before GET. A catch inside GET cannot
+handle those failures. `application.handle_with_processors` propagates `HTTPError`
+subclasses (including `SessionExpired`) through outer processors; ordinary errors
+are converted to HTTP 500 at the inner processor boundary.
+
+With `ignore_expiry=True` (the default), a cookie whose record is absent starts a
+new session. **Current limitation:** with `ignore_expiry=False`, that missing record
+calls `expired()` before `ip` has been loaded. Its `_save()` raises `KeyError('ip')`
+before `SessionExpired`, producing HTTP 500 with no replacement/deletion cookie.
+An outer `SessionExpired` catch does not repair this bug; do not broadly catch
+`KeyError` or all exceptions and turn failures into successful/authenticated requests.
+
+An existing record with a changed IP and `ignore_change_ip=False` does reach
+`SessionExpired`, because the saved `ip` was loaded. The following bounded example
+handles **that** path, changes its default 200 to an explicit 400, and proves GET
+was not called. `expired()` marks the cookie for expiry but does not delete the
+existing stored record. There is no authentication or authorization in this demo.
 
 ```python
+# Executable usage: ### Session Expiration Handling
 import os
+from http.cookies import SimpleCookie
 import web
 from web import session
 
 web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+web.config.session_parameters.update(ignore_expiry=False, ignore_change_ip=False)
 app = web.application((), {}, autoreload=False)
+seen = []
+
+def handle_expiry(handler):
+    try:
+        return handler()
+    except session.SessionExpired:
+        seen.append('expiry')
+        raise web.HTTPError('400 Bad Request', {}, 'Session expired; start again')
+
+# Registration order matters: this processor must surround the Session processor.
+app.add_processor(handle_expiry)
 store = session.MemoryStore()
-sess = session.Session(app, store)
+sess = session.Session(app, store, initializer={'visits': 0})
 
-class Login:
-    def POST(self):
-        # ... authentication logic ...
-        if authenticated:
-            session.user = 'john'
-            raise web.seeother('/dashboard')
-
-class Dashboard:
+class Index:
     def GET(self):
-        try:
-            if 'user' not in session:
-                raise web.seeother('/login')
-            return f"Welcome, {session.user}!"
-        except session.SessionExpired as e:
-            return e.data  # "Session expired"
+        seen.append('GET')
+        sess.visits += 1
+        return str(sess.visits)
+
+app.add_mapping('/', Index)
+first = app.request('/', env={'REMOTE_ADDR': '192.0.2.1'})
+assert first.status == '200 OK' and first.data == b'1'
+cookies = SimpleCookie()
+for key, value in first.header_items:
+    if key.lower() == 'set-cookie':
+        cookies.load(value)
+sid = cookies['webpy_session_id'].value
+headers = {'Cookie': 'webpy_session_id=' + sid}
+valid = app.request('/', headers=headers, env={'REMOTE_ADDR': '192.0.2.1'})
+assert valid.status == '200 OK' and valid.data == b'2'
+changed = app.request('/', headers=headers, env={'REMOTE_ADDR': '192.0.2.2'})
+assert changed.status == '400 Bad Request'
+assert changed.data == b'Session expired; start again'
+assert seen == ['GET', 'GET', 'expiry']
+assert store[sid]['visits'] == 2  # no handler/save of new data on expiry
+expired_cookie = SimpleCookie()
+for key, value in changed.header_items:
+    if key.lower() == 'set-cookie':
+        expired_cookie.load(value)
+assert expired_cookie['webpy_session_id']['expires']
+# A fresh client with no cookie starts over; no identity has been authenticated.
+assert app.request('/', env={'REMOTE_ADDR': '192.0.2.2'}).data == b'1'
 ```
 
 ### Session Kill (Logout)
@@ -686,24 +734,30 @@ with TemporaryDirectory() as root:
 2. **Automatic Cleanup**: Periodic removal of expired sessions based on timeout
 3. **IP Validation**: Optional protection against IP address changes (configurable)
 4. **Cookie Management**: Automatic session cookie handling with security flags (HttpOnly, Secure, SameSite)
-5. **Expiration Handling**: Configurable timeout periods with graceful handling
-6. **Thread Safety**: Uses `threadeddict` for thread-safe session access
+5. **Expiration Handling**: Configurable timeout/reset policy; the missing-record error path above is not graceful
+6. **Thread-local Data**: Uses `threadeddict` for per-thread request state, not locking or transactions across shared-store operations
 7. **Flexible Initialization**: Support for custom session initialization functions or dictionaries
-8. **Cross-Version Compatibility**: Works with both Python 2 and 3
-9. **Session ID Validation**: Validates session ID format to prevent tampering
+8. **Python Version**: The current package import chain includes session f-strings and function annotations, requiring Python 3 syntax. Python 2 was not executed or certified; this is not a guarantee for every Python 3 release
+9. **Session ID Validation**: Applies the permissive hexadecimal regex described below; format checks alone do not authenticate a cookie or prevent tampering
 10. **Atomic Operations**: DiskStore uses atomic file operations for reliability
 
 ## Security Considerations
 
 ### Session ID Generation
 
-Session IDs are generated using SHA1 hashing with:
-- Random 16-byte value from `os.urandom()`
-- Current timestamp
-- Client IP address
-- Secret key from configuration
+`_generate_session_id()` uses **SHA-256**, returning 64 lowercase hexadecimal
+characters. It hashes the UTF-8 encoding of the concatenated string representations
+of 16 bytes from `os.urandom(16)`, `time.time()`, `utils.safestr(web.ctx.ip)` and the
+copied secret key (the implementation uses an f-string). It retries when that ID
+already exists in the store. Generation/check is not an atomic reservation across
+workers; no universal collision/concurrency guarantee is implied.
 
-This provides strong uniqueness and makes session IDs difficult to predict.
+The separate `_valid_session_id()` uses `re.match` with `^[0-9a-fA-F]+$`, **not** a
+64-character fullmatch. Short/long and uppercase hex strings are accepted, and
+Python's `$` also allows a final newline (`'abc\n'` matches). Empty strings,
+non-hex letters and surrounding spaces fail. These are direct-validator results,
+not a promise that every such spelling survives HTTP cookie parsing. The format
+check is not cryptographic authentication of a session ID or an authorization policy.
 
 ### Cookie Security
 
@@ -752,38 +806,52 @@ integrity; signing is not encryption and the legacy decoder requires trusted dat
 
 ### Session Object
 
-The following historical API fragment is reference material, not a standalone
-program; `session` here is intended to mean an instance, not the imported module.
-Its direct-iteration recipe remains unverified/pending web issue #13. It is not
-included in the executable security examples.
-
-The session object supports dictionary-style and attribute-style access:
+Use `sess` for the instance; `session` below remains the imported module.
+Bracket/attribute access, membership and `get` work on request-local values.
+Iterate `sess.keys()` or `sess.items()`: direct `for key in sess` is not supported
+in this revision and falls back to integer item access, raising `KeyError(0)` for
+ordinary string-key data. Missing bracket keys raise `KeyError`; missing attributes
+raise `AttributeError`. Avoid names that collide with Session methods/internal data.
 
 ```python
-# Dictionary-style access
-session['key'] = 'value'
-value = session['key']
-del session['key']
+# Executable usage: ### Session Object
+import os
+import web
+from web import session
 
-# Attribute-style access
-session.key = 'value'
-value = session.key
-del session.key
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
+store = session.MemoryStore()
+sess = session.Session(app, store)
 
-# Check existence
-if 'key' in session:
-    print('Key exists')
+class Index:
+    def GET(self):
+        sess['example_key'] = 'value'
+        assert sess.example_key == 'value'
+        sess.example_key = 'changed'
+        assert sess['example_key'] == 'changed'
+        assert 'example_key' in sess
+        assert sess.get('absent', 'fallback') == 'fallback'
+        assert 'example_key' in list(sess.keys())
+        assert dict(sess.items())['example_key'] == 'changed'
+        del sess['example_key']
+        assert 'example_key' not in sess
+        sess.example_key = 'again'
+        del sess.example_key
+        assert 'example_key' not in sess
+        return 'mapping operations checked'
 
-# Get all keys
-for key in session:
-    print(key)
+app.add_mapping('/', Index)
+response = app.request('/')
+assert response.status == '200 OK' and response.data == b'mapping operations checked'
+assert not hasattr(session, 'example_key')  # never store request state on the module
 ```
 
 ### Session Lifecycle
 
-1. **Request Start**: Session processor loads session from store
-2. **Handler Execution**: Application code reads/writes session data
-3. **Request End**: Session processor saves session to store
+1. **Request Start**: Session processor runs cleanup, then loads/initializes session data
+2. **Handler Execution**: Only after successful load, application code reads/writes session data
+3. **Request End**: A finally block saves after handler return or error; it does not cover cleanup/load failures
 
 ### Cleanup Process
 
