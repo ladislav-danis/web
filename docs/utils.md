@@ -162,12 +162,108 @@ for item in iterview(range(100)):
 ```
 
 ### `safeiter(it, cleanup=None, ignore_errors=True)`
-Makes an iterator safe by handling exceptions during iteration.
+Returns a lazy generator over an iterable, preserving each yielded value. Neither
+`iter(it)` nor the first `next(it)` runs until the wrapper is first advanced.
 
-**Parameters:**
-- `it`: Iterator to make safe
-- `cleanup`: Optional cleanup function to call on exception
-- `ignore_errors`: If True (default), exceptions are ignored and iteration continues
+- `StopIteration` from advancing the iterator ends the wrapper normally (no
+  cleanup, traceback, or PEP 479 `RuntimeError`).
+- For another `Exception` raised by `next(it)`, a supplied `cleanup` is called
+  **once, without arguments, before** applying the error policy. A falsy callable
+  is still called; a noncallable value other than `None` fails when used.
+- With `ignore_errors=True` (default), the original exception is printed using
+  `traceback.print_exc()` to stderr, then the same iterator is advanced again.
+  With `False`, the original exception propagates without traceback printing.
+- If cleanup raises, its error is not caught or retried by `safeiter`; there is
+  no additional traceback printing by the wrapper.
+- `SystemExit`, `KeyboardInterrupt`, and `GeneratorExit` propagate without
+  cleanup or logging. Errors from `iter(it)` also propagate without this handling.
+  The handler surrounds only advancing the iterator, not `yield`: an exception
+  injected with the wrapper's `throw()` is not treated as an iterator failure.
+  Normal Python generator rules still apply: a `StopIteration` escaping
+  `iter(it)` or cleanup, or injected with `throw()`, becomes a PEP 479
+  `RuntimeError` with that `StopIteration` as its cause. Only exhaustion from
+  the underlying `next(it)` is handled as normal completion.
+
+Cleanup is an **error callback**, not a resource-finalization hook: normal
+exhaustion and wrapper `close()` do not call it, and closing the wrapper does not
+forward `close()` to the underlying iterator. Manage owned resources explicitly.
+The name does not promise safe or bounded execution for arbitrary iterators:
+there is no retry budget, so an iterator that keeps raising ordinary exceptions
+can loop forever inside one `next()` call with `ignore_errors=True`. A generator
+that raises an unhandled exception is normally closed; retrying it will not
+resurrect it or recover its remaining values. Recovery depends on the iterator's
+state and possibly the cleanup callback. Prefer strict mode if recovery is not
+known to be possible. Tracebacks can expose exception details; this is not a
+redacting logger.
+
+These finite, standalone examples require only the framework import:
+
+```python
+from web.utils import safeiter
+
+value = object()
+wrapped = safeiter([value, None, 3])
+assert next(wrapped) is value
+assert next(wrapped) is None
+assert next(wrapped) == 3
+sentinel = object()
+assert next(wrapped, sentinel) is sentinel
+assert next(wrapped, sentinel) is sentinel
+```
+
+A custom iterator can advance past a bad step. Here cleanup records the failed
+step; the first run captures the expected traceback, and the strict run stops at
+the same error instead of silently continuing:
+
+```python
+import contextlib
+import io
+from web.utils import safeiter
+
+class Steps:
+    def __init__(self):
+        self.position = 0
+        self.error = ValueError('bad step')
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.position += 1
+        if self.position == 1:
+            return 'before'
+        if self.position == 2:
+            raise self.error
+        if self.position == 3:
+            return 'after'
+        raise StopIteration
+
+source = Steps()
+cleaned = []
+wrapped = safeiter(source, cleanup=lambda: cleaned.append(source.position))
+stderr = io.StringIO()
+with contextlib.redirect_stderr(stderr):
+    assert next(wrapped) == 'before'
+    assert next(wrapped) == 'after'
+    sentinel = object()
+    assert next(wrapped, sentinel) is sentinel
+assert cleaned == [2]
+assert 'ValueError: bad step' in stderr.getvalue()
+
+source = Steps()
+cleaned = []
+wrapped = safeiter(source, cleanup=lambda: cleaned.append(source.position),
+                   ignore_errors=False)
+assert next(wrapped) == 'before'
+try:
+    next(wrapped)
+except ValueError as error:
+    assert error is source.error
+else:
+    raise AssertionError('strict iteration must propagate the error')
+assert cleaned == [2]
+assert source.position == 2
+```
 
 ### `safewrite(filename, content)`
 Writes content to a temporary file and moves it to avoid overwriting errors.

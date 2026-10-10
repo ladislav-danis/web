@@ -728,20 +728,30 @@ iterbetter = IterBetter
 
 
 def safeiter(it, cleanup=None, ignore_errors=True):
-    """Makes an iterator safe by ignoring the exceptions occurred during the iteration."""
+    """Yield values lazily, optionally handling errors from advancing ``it``.
 
-    def next():
-        while True:
-            try:
-                return next(it)
-            except StopIteration:
-                raise
-            except:
-                traceback.print_exc()
+    StopIteration ends normally. Other Exceptions call cleanup() once when
+    supplied, then either print a traceback and retry (ignore_errors=True) or
+    propagate unchanged. Cleanup errors and BaseExceptions are not caught.
+    Python's PEP 479 still applies to StopIteration escaping cleanup or iter(it).
+    Cleanup is not an exhaustion/close hook; a persistently failing iterator
+    can retry forever. Errors from iter(it) or an injected throw are not handled.
+    """
 
     it = iter(it)
     while True:
-        yield next()
+        try:
+            value = next(it)
+        except StopIteration:
+            return
+        except Exception:
+            if cleanup is not None:
+                cleanup()
+            if not ignore_errors:
+                raise
+            traceback.print_exc()
+            continue
+        yield value
 
 
 def safewrite(filename, content):
