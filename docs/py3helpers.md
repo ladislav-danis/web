@@ -1,12 +1,49 @@
 # Web Python 3 Helpers Documentation
 
-This document describes the Python 3 compatibility utilities in `web/py3helpers.py`, which provide cross-compatibility functions for dictionary iteration between Python 2 and Python 3.
+`web.py3helpers` provides `iterkeys`, `itervalues`, and `iteritems` for dictionary
+iteration. The current web.py package is Python 3 only; all runnable examples on
+this page target Python 3.
 
 ## Overview
 
-The `py3helpers` module contains utility functions that help maintain compatibility between Python 2 and Python 3 by providing consistent interfaces for dictionary iteration operations. These helpers are particularly useful when writing code that needs to run on both Python versions.
+Historically these helpers bridged dictionary iteration in Python 2 and Python 3.
+Python 2's `.keys()`, `.values()`, and `.items()` returned lists. In Python 3 these
+methods return **dictionary views**, which are iterable but are not iterators:
+you can iterate over a view repeatedly, but `next(view)` raises `TypeError`.
 
-In Python 2, dictionary methods like `.keys()`, `.values()`, and `.items()` return lists, while in Python 3 they return iterators. These helpers ensure consistent iterator behavior across both versions.
+Each helper applies `iter()` to the corresponding view and returns a fresh,
+one-shot iterator. `iter(iterator)` returns that same iterator; `next()` consumes
+one entry and eventually raises `StopIteration`. Iterating again does not rewind
+it. Call the helper again for a fresh independent traversal of the dictionary.
+The `iter()` wrapper is therefore not redundant when an iterator is required.
+
+```python
+from web.py3helpers import iterkeys
+
+data = {'a': 1, 'b': 2}
+view = data.keys()
+assert list(view) == ['a', 'b']
+assert list(view) == ['a', 'b']
+try:
+    next(view)
+except TypeError:
+    pass
+else:
+    raise AssertionError('A dictionary view is not an iterator')
+
+iterator = iterkeys(data)
+assert iter(iterator) is iterator
+assert next(iterator) == 'a'
+assert list(iterator) == ['b']
+assert list(iterator) == []
+try:
+    next(iterator)
+except StopIteration:
+    pass
+else:
+    raise AssertionError('The iterator should be exhausted')
+assert list(iterkeys(data)) == ['a', 'b']
+```
 
 ## Functions
 
@@ -22,6 +59,8 @@ Returns an iterator over the dictionary's keys.
 
 **Example:**
 ```python
+from web.py3helpers import iterkeys
+
 d = {'a': 1, 'b': 2}
 for key in iterkeys(d):
     print(key)
@@ -39,6 +78,8 @@ Returns an iterator over the dictionary's values.
 
 **Example:**
 ```python
+from web.py3helpers import itervalues
+
 d = {'a': 1, 'b': 2}
 for value in itervalues(d):
     print(value)
@@ -56,6 +97,8 @@ Returns an iterator over the dictionary's key-value pairs.
 
 **Example:**
 ```python
+from web.py3helpers import iteritems
+
 d = {'a': 1, 'b': 2}
 for key, value in iteritems(d):
     print(key, value)
@@ -63,12 +106,12 @@ for key, value in iteritems(d):
 
 ## Usage Examples
 
-### Cross-Version Dictionary Iteration
+### Current Python 3 Dictionary Iteration
 
 ```python
 from web.py3helpers import iterkeys, itervalues, iteritems
 
-# These functions work consistently across Python 2 and 3
+# This example imports the current Python 3 package.
 data = {'name': 'John', 'age': 30, 'city': 'New York'}
 
 for key in iterkeys(data):
@@ -83,20 +126,21 @@ for key, value in iteritems(data):
 
 ### Migration from Python 2 to 3
 
-```python
-# Instead of:
-# for key in dict.keys():  # Python 2 (returns list)
-# for key in dict:         # Python 3 (iterates over keys)
+When porting a loop, pass a dictionary **instance**, not the builtin `dict` type.
+This runnable example is for the current Python 3 package:
 
-# Use:
+```python
 from web.py3helpers import iterkeys
-for key in iterkeys(dict):
-    pass
+
+data = {'a': 1, 'b': 2}
+for key in iterkeys(data):
+    print(key)
 ```
 
 ## Implementation Details
 
-The module uses simple lambda functions that wrap the standard dictionary methods:
+The following is a source illustration, not a substitute for importing the real
+helpers in application code:
 
 ```python
 iterkeys = lambda d: iter(d.keys())
@@ -106,12 +150,22 @@ iteritems = lambda d: iter(d.items())
 
 ## Notes
 
-- These functions are designed to provide a consistent interface regardless of the Python version being used
-- In Python 3, they return iterators (as opposed to lists) for memory efficiency
-- The module is primarily intended for internal use within web.py to maintain compatibility
-- These helpers are not needed in pure Python 3 code where standard dictionary methods can be used directly
-- In Python 3, `dict.keys()`, `dict.values()`, and `dict.items()` already return dictionary view objects (which are iterators), so the `iter()` wrapper is redundant but harmless
+- For a plain Python 3 `for` loop, use `for key in data`, `for value in
+  data.values()`, or `for key, value in data.items()` directly. Use
+  `iter(data)`, `iter(data.values())`, `iter(data.items())`, or these helpers when
+  you specifically need an iterator, for example for `next()`.
+- All traversal examples assume the dictionary is left unchanged during traversal.
+- The three lambda expressions above are syntactically portable between Python
+  2 and Python 3. That does **not** make the current package importable on Python
+  2: importing `web.py3helpers` first initializes `web`, whose imported modules
+  use Python 3 syntax such as f-strings and type annotations. The usage example
+  above also contains an f-string. The source module's historical compatibility
+  docstring is not a current package-support guarantee. No Python 2 execution is
+  claimed here.
 
 ## Dependencies
 
-This module has no external dependencies beyond the standard library.
+The three helper expressions themselves use only Python builtins. Importing
+`web.py3helpers` still initializes the package and requires web.py's dependencies;
+the small helper file is not an independent, dependency-free package import.
+See the [framework README](../README.md) for current setup and usage.
