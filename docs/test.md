@@ -1,150 +1,251 @@
 # Web Test Utilities Documentation
 
-This document describes the test utilities in `web/test.py`, which provide helper functions for running unit tests and doctests in web.py applications.
-
-## Overview
-
-The test module provides utilities for creating and running test suites that can include both unit tests and doctests. It integrates with Python's built-in unittest framework and supports loading tests from modules, creating test suites from doctests, and running tests with proper output handling.
+`web.test` wraps Python's `unittest` and `doctest`; it is not pytest discovery
+and does not automatically combine the two kinds of tests. Import it explicitly.
+A successful result with **zero executed tests is not evidence of coverage**.
+Check both the intended selection and the result.
 
 ## Functions
 
 ### `load_modules(names)`
-Loads multiple Python modules by name.
 
-**Parameters:**
-- `names` (list[str]): List of module names to import
+Accepts iterable module names and returns a list of module objects in order.
+Dotted names resolve to the named submodule, not just the top-level package.
+Imports execute module-level code; import errors propagate. This example only
+imports modules, **it does not run tests**:
 
-**Returns:**
-- `list`: List of imported module objects
-
-**Example:**
 ```python
-modules = load_modules(['web.db', 'web.template'])
+import web.test
+
+modules = web.test.load_modules(['web.db', 'web.template'])
+assert [module.__name__ for module in modules] == ['web.db', 'web.template']
 ```
 
 ### `module_suite(module, classnames=None)`
-Creates a test suite from a module.
 
-**Parameters:**
-- `module`: Module object to create tests from
-- `classnames` (list[str], optional): List of specific class names to include
+Accepts an imported module. Selection precedence is:
 
-**Returns:**
-- `unittest.TestSuite`: Test suite containing tests from the module
+1. A **truthy** `classnames` collection goes to
+   `unittest.TestLoader().loadTestsFromNames(classnames, module)`. Names may
+   identify classes or dotted methods relative to the module, e.g.
+   `['SampleTests.test_add']`.
+2. Otherwise, if the module has a `suite` attribute, call `module.suite()`.
+3. Otherwise, use `unittest.TestLoader().loadTestsFromModule(module)`.
 
-**Behavior:**
-- If `classnames` is provided, loads specific test classes using `unittest.TestLoader().loadTestsFromNames()`
-- If module has a `suite()` function, calls it
-- Otherwise, loads all tests from the module using `unittest.TestLoader().loadTestsFromModule()`
-
-### `doctest_suite(module_names)`
-Creates a test suite from doctests in modules.
-
-**Parameters:**
-- `module_names` (list[str]): List of module names to extract doctests from
-
-**Returns:**
-- `unittest.TestSuite`: Test suite containing doctests from specified modules
-
-**Behavior:**
-- Loads modules using [`load_modules()`](#load_modulesnames)
-- Creates a DocTestSuite for each module using `doctest.DocTestSuite()`
-- Adds each doctest suite to the result suite
-
-**Example:**
-```python
-suite = doctest_suite(['web.db', 'web.template'])
-```
+An empty list therefore does not mean “select nothing”: it follows steps 2–3.
+The custom factory controls its returned suite; exceptions propagate. Invalid
+selectors can produce unittest error cases that fail when run, rather than an
+immediate loader exception. This does not discover pytest-style free functions
+or automatically add docstrings.
 
 ### `suite(module_names)`
-Creates a comprehensive test suite from multiple modules.
 
-**Parameters:**
-- `module_names` (list[str]): List of module names to include in the test suite
+Imports each named module, calls `module_suite(module)`, and adds its result to a
+new `TestSuite`. **This is the unittest/custom-suite path, not doctest loading.**
+In particular, `suite(['web.db', 'web.template'])` currently contains zero cases.
+Use actual TestCase-bearing modules, as in the sample below, or explicitly use
+`doctest_suite` for docstrings.
 
-**Returns:**
-- `unittest.TestSuite`: Combined test suite from all specified modules
+### `doctest_suite(module_names)`
 
-**Example:**
-```python
-suite = suite(['web.db', 'web.template', 'web.form'])
-```
+Imports each named module and adds `doctest.DocTestSuite(module)` to a new
+`TestSuite`. Each discovered doctest-bearing docstring contributes a
+`DocTestCase`, which may contain several `>>>` examples. `countTestCases()` and
+`result.testsRun` count these unittest cases, **not individual doctest examples**.
+Building a suite does not execute it or establish that its expectations pass.
 
 ### `runTests(suite)`
-Runs a test suite and returns the results.
 
-**Parameters:**
-- `suite` (unittest.TestSuite): Test suite to execute
-
-**Returns:**
-- `unittest.TextTestResult`: Results of the test execution
-
-**Example:**
-```python
-result = runTests(my_suite)
-```
+Constructs a default `unittest.TextTestRunner()` and returns its real result
+(normally `unittest.TextTestResult`). It prints the normal runner report, by
+default to stderr. Inspect `testsRun`, `failures`, `errors` and `wasSuccessful()`.
+It does **not** exit the process on failed tests. For a script/CI gate, explicitly
+raise `SystemExit(1)` on an unsuccessful result, as the examples do.
+Construct a fresh suite for each run; unittest may consume its case references.
 
 ### `main(suite=None)`
-Main function for running tests from command line or as module.
 
-**Parameters:**
-- `suite` (unittest.TestSuite, optional): Test suite to run (defaults to loading from __main__)
+With a truthy supplied suite, runs that suite without interpreting CLI selectors.
+With a falsy value (including the default `None`), imports `__main__`, removes
+all argument tokens starting with `-`, and passes the remaining tokens (or
+`None` if empty) to `module_suite`. An ordinary empty `unittest.TestSuite()` is
+truthy: it is run as zero tests, not replaced by discovery.
 
-**Behavior:**
-- If no suite provided, loads tests from the main module using `module_suite()`
-- Supports command-line arguments for specifying test classes (non-switch arguments)
-- Runs tests and exits with appropriate status code (0 for success, 1 for failure)
-
-**Example:**
-```python
-# Run all tests in current module
-if __name__ == "__main__":
-    main()
-```
+This is **not unittest's full option parser**: `-v`, `-q`, `--help` and other
+hyphen-prefixed tokens are discarded, not implemented as options. A separate
+value following a discarded token remains a selector. No switch here changes
+TextTestRunner verbosity. Use only the class/method selectors shown below.
+After the runner returns, `main` calls `sys.exit(not result.wasSuccessful())`:
+exit 0 for success, 1 for reported failures/errors. Import or suite-construction
+exceptions may propagate before a result exists. A zero-test suite can also
+exit 0, so inspect selection counts rather than relying on the exit code alone.
 
 ## Classes
 
-### `TestCase`
-Alias for `unittest.TestCase` - provides base class for test cases.
-
-### `TestSuite`
-Alias for `unittest.TestSuite` - provides container for test cases and suites.
+`TestCase` is exactly `unittest.TestCase`; `TestSuite` is exactly
+`unittest.TestSuite`, not framework-specific subclasses.
 
 ## Usage Examples
 
-### Running Specific Tests
+### Sample module
+
+Save this exact code as `runner_sample.py` in a disposable working directory.
+Use an environment where this checkout's `web` package is importable (from the
+Core root, set `PYTHONPATH` to the absolute `src` path). Run later examples from
+that directory so `runner_sample` is importable. No application configuration,
+database or optional database driver is needed. Each later Python block is a
+separate script with its own imports; no interactive namespace is assumed.
+
 ```python
-# Run tests from specific modules
 import web.test
 
-suite = web.test.suite(['web.db', 'web.template'])
-web.test.runTests(suite)
+
+def double(value):
+    """Double a number.
+
+    >>> double(3)
+    6
+    >>> double(-1)
+    -2
+    """
+    return value * 2
+
+
+class SampleTests(web.test.TestCase):
+    def test_add(self):
+        self.assertEqual(2 + 3, 5)
+
+    def test_upper(self):
+        self.assertEqual('web'.upper(), 'WEB')
+
+
+if __name__ == '__main__':
+    web.test.main()
+```
+
+### Running Specific Tests
+
+This selects two real unittest methods, not the doctests in `double`.
+
+```python
+import web.test
+import runner_sample
+
+selected = web.test.module_suite(runner_sample, ['SampleTests'])
+assert selected.countTestCases() == 2
+result = web.test.runTests(selected)
+if not result.wasSuccessful():
+    raise SystemExit(1)
+assert result.testsRun == 2
 ```
 
 ### Using Doctests
-```python
-# Create suite including doctests
-suite = web.test.doctest_suite(['web.db', 'web.template'])
-web.test.runTests(suite)
-```
 
-### Command Line Usage
-```bash
-# Run tests from a module
-python -m web.db
+This runs the one `runner_sample.double` DocTestCase containing two examples;
+it does not run `SampleTests`.
 
-# Run specific test classes
-python -m web.db TestDatabase
-```
-
-### Custom Test Suite
 ```python
 import web.test
 
-# Create custom test suite
-suite = web.test.suite(['web.db', 'web.template'])
-suite.addTest(web.test.doctest_suite(['web.form']))
-
-# Run the combined suite
-web.test.runTests(suite)
+selected = web.test.doctest_suite(['runner_sample'])
+assert selected.countTestCases() == 1
+result = web.test.runTests(selected)
+if not result.wasSuccessful():
+    raise SystemExit(1)
+assert result.testsRun == 1
 ```
+
+### Custom Test Suite
+
+Explicitly combine two unittest methods and one DocTestCase. The report is
+three cases, not four; the two doctest examples belong to one case.
+
+```python
+import web.test
+
+selected = web.test.suite(['runner_sample'])
+assert selected.countTestCases() == 2
+selected.addTest(web.test.doctest_suite(['runner_sample']))
+assert selected.countTestCases() == 3
+result = web.test.runTests(selected)
+if not result.wasSuccessful():
+    raise SystemExit(1)
+assert result.testsRun == 3
+```
+
+### Command Line Usage
+
+Run these commands in the sample directory with the same Python environment.
+They execute respectively two, two and one unittest methods. The method selector
+is relative to the script's `__main__` module.
+
+```bash
+python runner_sample.py
+python runner_sample.py SampleTests
+python runner_sample.py SampleTests.test_add
+```
+
+`python -m web.db TestDatabase` is **not** a class selector. That module's
+entry point calls `doctest.testmod()`, `test_parser()` and `test_safeeval()`
+directly; it does not call `web.test.main()` or use that argument. Its current
+doctest failures also do not force a nonzero process exit. Do not use it as a
+class-selection recipe or a green CI gate.
+
+### Failing control
+
+Save as `runner_failure.py` alongside the sample. This is deliberately wrong:
+running it must report one failed unittest and exit 1. It is a negative control,
+not part of the successful sample suite.
+
+```python
+import web.test
+
+
+class FailureTests(web.test.TestCase):
+    def test_failure(self):
+        self.assertEqual(2 + 2, 5)
+
+
+if __name__ == '__main__':
+    web.test.main()
+```
+
+### Negative CLI controls
+
+Run each independently and inspect its exit status. The first runs the deliberate
+failure (one failure, exit 1). The second selects an absent class (one loader
+error case, exit 1), not zero silently successful tests.
+
+```bash
+python runner_failure.py FailureTests.test_failure
+python runner_sample.py NoSuchClass
+```
+
+### Inventory is not execution
+
+This diagnostic only builds suites and counts examples; it does not run them.
+On this pinned revision, `web.db` has 23 DocTestCases / 83 examples,
+`web.template` 18 / 124, and `web.form` 22 / 45. Thus the old db+template unit
+suite is empty, while their doctest suite has 41 cases, not 41 examples. The old
+custom suite only ran the added form doctests. Counts may change with source.
+
+```python
+import doctest
+import web.test
+
+for module in web.test.load_modules(['web.db', 'web.template', 'web.form']):
+    units = web.test.module_suite(module).countTestCases()
+    docs = web.test.doctest_suite([module.__name__]).countTestCases()
+    examples = sum(len(test.examples) for test in doctest.DocTestFinder().find(module))
+    print(module.__name__, 'unit cases:', units,
+          'doctest cases:', docs, 'doctest examples:', examples)
+```
+
+These framework docstrings are **not a green quickstart** on the audited Python
+3.13 environment: db's direct doctest runner attempted 83 examples with two
+repr-order failures, template attempted 124 with 60 failures, and the old custom
+suite ran 22 form DocTestCases with 21 failing cases. Case failures and example
+failures are different units. Existing expectation/CLI issues are tracked in
+[web#32](https://git.home.arpa/mosaic-ai/web/issues/32), and the restricted-template
+`strftime` limitation separately in [web#33](https://git.home.arpa/mosaic-ai/web/issues/33).
+This reference repair does not change those runtime contracts or expectations.
