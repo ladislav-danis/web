@@ -6,6 +6,34 @@ This document describes the session management functionality in `web/session.py`
 
 The session module implements a flexible session management system that can store session data in various backends including disk, database, memory, and shelf storage. It handles session creation, validation, cleanup, and cookie management automatically.
 
+## Reading and running the examples
+
+**Configure a persistent application secret before constructing any `Session`,
+including one backed by MemoryStore or ShelfStore.** Provision a unique random
+secret once in your deployment's secret manager/environment as `SESSION_SECRET_KEY`;
+reuse it across restarts and all workers. Do not generate a new key per request or
+startup, and do not commit it. The framework does not read this environment variable
+itself: each standalone example explicitly assigns it before construction.
+
+`Session` copies `web.config.session_parameters` and assigns the copied key to its
+store. Leaving the exact built-in `DEFAULT_SECRET_KEY` raises
+`web.session.SessionSecretRequired` immediately. This check is **not** entropy,
+length, or nonempty validation: an empty/short key is accepted; a missing config
+attribute raises `AttributeError`, and `None` can fail later during signing.
+The examples use `os.environ["SESSION_SECRET_KEY"]` to fail on a missing variable;
+operators must also reject empty/weak values. Changing global configuration later
+does not update an existing Session's copied configuration.
+
+Only fences marked `# Executable:` are standalone offline examples. Run them with
+the provisioned environment variable; disk/SQLite/shelf demos own temporary paths
+and clean them up, so they are not persistent deployment stores. A deployed store
+needs an application-owned protected path and lifecycle instead. Signatures, data
+shapes and handler fragments are reference material, not standalone programs.
+The expiration and broad API reference fragments remain outside this security
+repair (web issue #13); they are not verified working recipes. This page's security
+examples do not certify the remaining thread-safety, ID-generation or Python-version
+claims tracked by that separate issue.
+
 ## Classes
 
 ### `SessionExpired`
@@ -45,8 +73,19 @@ def __init__(self, app, store, initializer=None)
 
 **Example:**
 ```python
-store = session.DiskStore('/tmp/sessions')
-sess = session.Session(app, store, initializer={'user': 'guest'})
+# Executable: ### `Session`
+import os
+import web
+from web import session
+
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
+
+from tempfile import TemporaryDirectory
+with TemporaryDirectory() as root:
+    store = session.DiskStore(root)
+    sess = session.Session(app, store, initializer={'user': 'guest'})
+    assert store.secret_key == os.environ["SESSION_SECRET_KEY"]
 ```
 
 #### Special Methods
@@ -96,10 +135,55 @@ Abstract base class for all session storage backends. Defines the interface that
 - `cleanup(self, timeout)`: Remove all expired sessions
 
 ##### Utility Methods
-- `encode(self, session_dict)`: Encode session dict as base64-encoded pickle string
-- `decode(self, session_data)`: Decode base64-encoded pickle string to session dict
+- `encode(self, session_dict)`: `json.dumps` → UTF-8 bytes → HMAC-SHA256
+  hexadecimal signature + `b'.'` + JSON bytes → `base64.encodebytes`. Returns
+  **bytes**, including base64 line breaks; this is authentication, not encryption.
+- `decode(self, session_data)`: Accepts bytes or text, strips surrounding whitespace,
+  base64-decodes, verifies the modern signature, then applies `json.loads`.
 
-**Note:** All stores must implement the required methods. The encode/decode methods provide default serialization using pickle and base64.
+Direct `Store`, `DiskStore` and `DBStore` serialization requires assigning
+`store.secret_key` first. `Session` normally does this during construction.
+Modern signed-payload tampering or use of a different key raises
+`web.session.SessionTamperedError`. This is not a universal parse-error wrapper:
+malformed base64 can raise `binascii.Error`, and correctly signed invalid JSON can
+raise `json.JSONDecodeError`.
+
+JSON-compatible dictionaries, lists, strings, numbers, booleans and null values
+are supported. This is not arbitrary Python-object persistence: tuples become
+lists, integer dictionary keys become strings; bytes, sets, datetimes and arbitrary
+objects raise `TypeError`, and circular structures fail. The default Python JSON
+encoder/decoder also accepts non-finite floats (NaN/Infinity); do not infer strict
+finite-JSON validation or type-preserving round trips for every input.
+
+**Legacy trust boundary:** After base64 decoding, a first byte `0x80`, `0x8a` or
+`0x90` selects a compatibility branch that calls `pickle.loads` **before any
+signature verification**. It can accept unsigned legacy data regardless of key
+rotation. Never read an untrusted or attacker-writable session store: unpickling
+can execute code. Only locally generated benign dictionaries are used in tests;
+no deployed legacy records have been inspected or assumed to exist. A legacy read
+computes a signed representation but **does not persist a rewritten payload**;
+only a later `__setitem__` writes the modern format (DB reads can update `atime`).
+
+MemoryStore keeps Python values in a dict; ShelfStore uses `shelve` and its own
+pickle-based persistence. Neither normally calls `Store.encode/decode` for stored
+values, so neither has this signed-JSON verification/rotation guarantee. Treat
+shelf files as trusted inputs too. See [rotation policy](#secret-rotation-policy).
+
+### Signed store example
+
+This exercises only the modern format; it is not a legacy-migration command.
+
+```python
+# Executable: ### Signed store example
+import os
+from web import session
+
+store = session.Store()
+store.secret_key = os.environ["SESSION_SECRET_KEY"]
+payload = store.encode({'user': 'guest', 'permissions': ['read']})
+assert isinstance(payload, bytes)
+assert store.decode(payload) == {'user': 'guest', 'permissions': ['read']}
+```
 
 ### `DiskStore`
 
@@ -115,7 +199,16 @@ def __init__(self, root)
 
 **Example:**
 ```python
-store = session.DiskStore('/tmp/sessions')
+# Executable: ### `DiskStore`
+import os
+from tempfile import TemporaryDirectory
+from web import session
+
+with TemporaryDirectory() as root:
+    store = session.DiskStore(root)
+    store.secret_key = os.environ["SESSION_SECRET_KEY"]
+    store['example'] = {'user': 'guest'}
+    assert store['example'] == {'user': 'guest'}
 ```
 
 #### Methods
@@ -156,19 +249,30 @@ The sessions table must have the following columns:
 |--------|------|-------------|
 | session_id | CHAR(128) | Unique session identifier (PRIMARY KEY) |
 | atime | DATETIME | Last access time (auto-updated) |
-| data | TEXT | Base64-encoded pickled session data |
+| data | TEXT | ASCII text of the base64-encoded signed JSON payload (legacy records may still contain unsigned pickle) |
 
 **Example:**
 ```python
-db = web.database(dbn='sqlite', db='mydb')
-db.query('''
-    CREATE TABLE sessions (
-        session_id CHAR(128) UNIQUE NOT NULL,
-        atime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        data TEXT
-    )
-''')
-store = session.DBStore(db, 'sessions')
+# Executable: ### `DBStore`
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import web
+from web import session
+
+with TemporaryDirectory() as root:
+    db = web.database(dbn='sqlite', db=str(Path(root) / 'sessions.db'))
+    connection = db.ctx.db
+    try:
+        db.query("CREATE TABLE sessions (session_id TEXT UNIQUE NOT NULL, "
+                 "atime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, data TEXT)")
+        store = session.DBStore(db, 'sessions')
+        store.secret_key = os.environ["SESSION_SECRET_KEY"]
+        store['example'] = {'user': 'guest'}
+        assert store['example'] == {'user': 'guest'}
+        assert isinstance(db.select('sessions')[0].data, str)
+    finally:
+        connection.close()
 ```
 
 #### Methods
@@ -198,10 +302,14 @@ def __init__(self, d_store=None)
 
 **Example:**
 ```python
-store = session.MemoryStore()
-# Or with a custom dict
+# Executable: ### `MemoryStore`
+from web import session
+
 custom_store = {}
 store = session.MemoryStore(custom_store)
+store['example'] = {'user': 'guest'}
+assert store['example'] == {'user': 'guest'}
+# Direct MemoryStore operations do not sign values. Session still requires a key.
 ```
 
 #### Data Structure
@@ -240,9 +348,18 @@ def __init__(self, shelf)
 
 **Example:**
 ```python
+# Executable: ### `ShelfStore`
 import shelve
-shelf = shelve.open('/tmp/sessions.shelf')
-store = session.ShelfStore(shelf)
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from web import session
+
+with TemporaryDirectory() as root:
+    with shelve.open(str(Path(root) / 'sessions.shelf')) as shelf:
+        store = session.ShelfStore(shelf)
+        store['example'] = {'user': 'guest'}
+        assert store['example'] == {'user': 'guest'}
+# Direct ShelfStore operations are not signed JSON. Never open untrusted shelves.
 ```
 
 #### Methods
@@ -269,7 +386,7 @@ Session behavior is controlled through `web.config.session_parameters`, which is
 | `timeout` | int | `86400` (24 hours) | Session timeout in seconds |
 | `ignore_expiry` | bool | `True` | Whether to ignore expired sessions (reset instead of error) |
 | `ignore_change_ip` | bool | `True` | Whether to ignore IP address changes |
-| `secret_key` | str | `"fLjUfxqXtfNoIldA0A0J"` | Secret key for session ID generation |
+| `secret_key` | str | `"fLjUfxqXtfNoIldA0A0J"` (rejected by Session) | Explicit application secret for ID generation and signed-store HMAC; configure before construction |
 | `expired_message` | str | `"Session expired"` | Message to display when session expires |
 | `httponly` | bool | `True` | Whether to set HttpOnly flag on cookie |
 | `secure` | bool | `False` | Whether to set Secure flag on cookie |
@@ -277,16 +394,27 @@ Session behavior is controlled through `web.config.session_parameters`, which is
 ### Configuration Example
 
 ```python
+# Executable: ### Configuration Example
+import os
 import web
+from web import session
 
-web.config.session_parameters = utils.storage({
-    'cookie_name': 'my_app_session',
-    'timeout': 3600,  # 1 hour
-    'ignore_change_ip': False,  # Enable IP validation
-    'httponly': True,
-    'secure': True,  # Use in production with HTTPS
-    'samesite': 'Lax'
-})
+# Update, rather than replace, to retain the other required defaults.
+web.config.session_parameters.update(
+    cookie_name='my_app_session', timeout=3600,
+    httponly=True, secure=True, samesite='Lax')
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
+sess = session.Session(app, session.MemoryStore())
+class Index:
+    def GET(self):
+        sess.visits = sess.get('visits', 0) + 1
+        return str(sess.visits)
+app.add_mapping('/', Index)
+response = app.request('/', https=True)
+assert response.status == '200 OK' and response.data == b'1'
+assert any('HttpOnly' in value and 'Secure' in value and 'SameSite=Lax' in value
+           for key, value in response.header_items if key.lower() == 'set-cookie')
 ```
 
 ## Usage Examples
@@ -294,106 +422,178 @@ web.config.session_parameters = utils.storage({
 ### Basic Session Setup
 
 ```python
+# Executable: ### Basic Session Setup
+import os
 import web
 from web import session
 
-# Create a session store
-store = session.DiskStore('/tmp/sessions')
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
 
-# Create session object
-sess = session.Session(app, store)
-
-# Use in application handlers
-class Index:
-    def GET(self):
-        # Initialize counter if not exists
-        session.count = session.get('count', 0) + 1
-        return f"Count: {session.count}"
+from tempfile import TemporaryDirectory
+with TemporaryDirectory() as root:
+    store = session.DiskStore(root)
+    sess = session.Session(app, store)
+    class Index:
+        def GET(self):
+            sess.count = sess.get('count', 0) + 1
+            return f"Count: {sess.count}"
+    app.add_mapping('/', Index)
+    first, second = app.browser(), app.browser()
+    assert first.open('/').read() == b'Count: 1'
+    assert first.open('/').read() == b'Count: 2'
+    assert second.open('/').read() == b'Count: 1'
 ```
 
 ### Database Session Store
 
 ```python
+# Executable: ### Database Session Store
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import web
 from web import session
 
-# Setup database
-db = web.database(dbn='sqlite', db='mydb')
-db.query('''
-    CREATE TABLE IF NOT EXISTS sessions (
-        session_id CHAR(128) UNIQUE NOT NULL,
-        atime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        data TEXT
-    )
-''')
-
-# Create session store
-store = session.DBStore(db, 'sessions')
-sess = session.Session(app, store)
+with TemporaryDirectory() as root:
+    db = web.database(dbn='sqlite', db=str(Path(root) / 'sessions.db'))
+    connection = db.ctx.db
+    try:
+        db.query("CREATE TABLE sessions (session_id TEXT UNIQUE NOT NULL, "
+                 "atime DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, data TEXT)")
+        store = session.DBStore(db, 'sessions')
+        web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+        app = web.application((), {}, autoreload=False)
+        sess = session.Session(app, store)
+        store['example'] = {'user': 'guest'}
+        assert store['example'] == {'user': 'guest'}
+        assert isinstance(db.select('sessions')[0].data, str)
+    finally:
+        connection.close()
 ```
 
 ### Memory Session Store (Testing)
 
 ```python
+# Executable: ### Memory Session Store (Testing)
+import os
 import web
 from web import session
 
-# Use memory store for testing
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
+
 store = session.MemoryStore()
 sess = session.Session(app, store)
+class Index:
+    def GET(self):
+        sess.count = sess.get('count', 0) + 1
+        return f"Count: {sess.count}"
+app.add_mapping('/', Index)
+first, second = app.browser(), app.browser()
+assert first.open('/').read() == b'Count: 1'
+assert first.open('/').read() == b'Count: 2'
+assert second.open('/').read() == b'Count: 1'
 ```
 
 ### Session with Initialization
 
 ```python
+# Executable: ### Session with Initialization
+import os
 import web
 from web import session
 
-def init_session():
-    session.user = 'guest'
-    session.permissions = ['read']
-    session.visits = 0
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
 
-store = session.DiskStore('/tmp/sessions')
+def init_session():
+    sess.user = 'guest'
+    sess.permissions = ['read']
+    sess.visits = 0
+
+store = session.MemoryStore()
 sess = session.Session(app, store, initializer=init_session)
+class Index:
+    def GET(self):
+        sess.visits += 1
+        return f"{sess.user}: {sess.visits} ({','.join(sess.permissions)})"
+app.add_mapping('/', Index)
+first, second = app.browser(), app.browser()
+assert first.open('/').read() == b'guest: 1 (read)'
+assert first.open('/').read() == b'guest: 2 (read)'
+assert second.open('/').read() == b'guest: 1 (read)'
+assert not hasattr(session, 'user')  # Never write user data on the shared module.
 ```
 
 ### Using Dictionary Initializer
 
 ```python
+# Executable: ### Using Dictionary Initializer
+import os
 import web
 from web import session
 
-initializer = {
-    'user': 'guest',
-    'permissions': ['read'],
-    'theme': 'default'
-}
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
 
-store = session.DiskStore('/tmp/sessions')
+initializer = {'user': 'guest', 'permissions': ['read'], 'visits': 0}
+
+store = session.MemoryStore()
 sess = session.Session(app, store, initializer=initializer)
+class Index:
+    def GET(self):
+        sess.visits += 1
+        return f"{sess.user}: {sess.visits} ({','.join(sess.permissions)})"
+app.add_mapping('/', Index)
+first, second = app.browser(), app.browser()
+assert first.open('/').read() == b'guest: 1 (read)'
+assert first.open('/').read() == b'guest: 2 (read)'
+assert second.open('/').read() == b'guest: 1 (read)'
+assert not hasattr(session, 'user')  # Never write user data on the shared module.
 ```
 
 ### Session with Custom IP Validation
 
 ```python
+# Executable: ### Session with Custom IP Validation
+import os
 import web
 from web import session
 
-# Disable ignore_change_ip to enforce IP binding
-web.config.session_parameters.ignore_change_ip = False
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
 
-store = session.DiskStore('/tmp/sessions')
+# Same-IP smoke only; expiry/error paths are not covered by this example.
+web.config.session_parameters.ignore_change_ip = False
+store = session.MemoryStore()
 sess = session.Session(app, store)
+class Index:
+    def GET(self):
+        sess.count = sess.get('count', 0) + 1
+        return f"Count: {sess.count}"
+app.add_mapping('/', Index)
+first, second = app.browser(), app.browser()
+assert first.open('/').read() == b'Count: 1'
+assert first.open('/').read() == b'Count: 2'
+assert second.open('/').read() == b'Count: 1'
 ```
 
 ### Session Expiration Handling
 
+**Unverified reference fragment, pending web issue #13, not an executable recipe.**
+The authentication placeholder and module/instance usage below remain incomplete.
+A handler-level catch is too late for errors while the session processor loads
+before the handler. Do not infer working expiry handling from this fragment.
+
 ```python
+import os
 import web
 from web import session
 
-store = session.DiskStore('/tmp/sessions')
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
+store = session.MemoryStore()
 sess = session.Session(app, store)
 
 class Login:
@@ -416,31 +616,68 @@ class Dashboard:
 ### Session Kill (Logout)
 
 ```python
+# Executable: ### Session Kill (Logout)
+import os
 import web
 from web import session
 
-store = session.DiskStore('/tmp/sessions')
-sess = session.Session(app, store)
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
 
+store = session.MemoryStore()
+sess = session.Session(app, store)
+class Index:
+    def GET(self):
+        sess.visits = sess.get('visits', 0) + 1
+        return str(sess.visits)
 class Logout:
     def POST(self):
-        session.kill()
+        sess.kill()
         raise web.seeother('/login')
+app.add_mapping('/', Index)
+app.add_mapping('/logout', Logout)
+first = app.request('/')
+from http.cookies import SimpleCookie
+cookies = SimpleCookie()
+for key, value in first.header_items:
+    if key.lower() == 'set-cookie':
+        cookies.load(value)
+sid = cookies['webpy_session_id'].value
+assert sid in store
+response = app.request('/logout', method='POST', data='',
+                       headers={'Cookie': 'webpy_session_id=' + sid})
+assert response.status == '303 See Other' and sid not in store
+assert app.request('/').data == b'1'
+# Supply authentication/CSRF policy separately in a real application.
 ```
 
 ### Shelf Store Example
 
 ```python
+# Executable: ### Shelf Store Example
+import os
 import web
 from web import session
+
+web.config.session_parameters.secret_key = os.environ["SESSION_SECRET_KEY"]
+app = web.application((), {}, autoreload=False)
+
 import shelve
-
-shelf = shelve.open('/tmp/sessions.shelf')
-store = session.ShelfStore(shelf)
-sess = session.Session(app, store)
-
-# Don't forget to close the shelf when done
-# shelf.close()
+from pathlib import Path
+from tempfile import TemporaryDirectory
+with TemporaryDirectory() as root:
+    with shelve.open(str(Path(root) / 'sessions.shelf')) as shelf:
+        store = session.ShelfStore(shelf)
+        sess = session.Session(app, store)
+        class Index:
+            def GET(self):
+                sess.count = sess.get('count', 0) + 1
+                return f"Count: {sess.count}"
+        app.add_mapping('/', Index)
+        first, second = app.browser(), app.browser()
+        assert first.open('/').read() == b'Count: 1'
+        assert first.open('/').read() == b'Count: 2'
+        assert second.open('/').read() == b'Count: 1'
 ```
 
 ## Features
@@ -487,18 +724,40 @@ When `ignore_change_ip` is `False`, the session will expire if the client's IP a
 ### Best Practices
 
 1. **Use HTTPS in production**: Always set `secure=True` when using HTTPS
-2. **Change secret_key**: Replace the default `secret_key` with a unique, random value
+2. **Configure secret_key before construction (required)**: Use a unique random persistent application secret, shared by all workers; the exact built-in default raises `SessionSecretRequired`, even with MemoryStore or ShelfStore. Do not generate a fresh key per request/restart.
 3. **Set appropriate timeout**: Configure timeout based on your application's needs
 4. **Enable IP validation**: Consider enabling `ignore_change_ip=False` for sensitive applications
-5. **Use HttpOnly**: Keep `httponly=True` to prevent XSS attacks
+5. **Use HttpOnly**: Keep `httponly=True` to restrict JavaScript access to the session cookie. It does not escape response HTML or prevent XSS; use context-appropriate output escaping and other XSS defenses. An XSS payload can still act through the victim's browser.
 6. **Clean up sessions**: Regularly clean up old session files from DiskStore
 7. **Secure storage**: Ensure session storage directories have appropriate permissions
+
+### Secret rotation policy
+
+For modern signed JSON in DiskStore/DBStore, a different key rejects the old
+payload with `SessionTamperedError`; that error is not itself a graceful logout
+workflow. Coordinate every writer/worker to use the new persistent secret and
+recreate/restart Sessions to take the new configuration. Mixed-key writers cannot
+reliably read one another's signed payloads.
+
+Do **not** promise that key rotation logs out every session: unsigned legacy
+pickle can remain readable, and MemoryStore/ShelfStore do not verify signed JSON
+on their normal data path. If all sessions must be invalidated, plan explicit
+invalidation of the relevant backing stores, including legacy entries and
+in-memory/shelf state, while coordinating all writers. This is an operator policy,
+not an instruction to delete a production store or an automatic migration.
+A read alone does not rewrite legacy payloads. Protect both secrets and store
+integrity; signing is not encryption and the legacy decoder requires trusted data.
 
 ## API Reference
 
 ### Session Object
 
-The session object behaves like a dictionary but with attribute-style access:
+The following historical API fragment is reference material, not a standalone
+program; `session` here is intended to mean an instance, not the imported module.
+Its direct-iteration recipe remains unverified/pending web issue #13. It is not
+included in the executable security examples.
+
+The session object supports dictionary-style and attribute-style access:
 
 ```python
 # Dictionary-style access
