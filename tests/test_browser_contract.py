@@ -3,7 +3,8 @@
 web#21 replaces the two A006 bytes cases in test_request_bytes_contract; the
 original str/urllib boundary node IDs below intentionally remain unchanged.
 Source repair web#22 replaces the four A-008 callable-link limitations one-to-one
-with desired-success regressions. A-009 show bytes remains unchanged.
+with desired-success regressions. web#23 replaces A-009 one-to-one with exact
+binary save, closed-file and intercepted single-launch regression coverage.
 See https://git.home.arpa/mosaic-ai/web/issues/3 for historical tracking.
 A future source repair must replace each affected limitation assertion with a
 one-to-one reconciled desired-contract regression, not silently delete coverage.
@@ -147,42 +148,10 @@ print(json.dumps({'repair': 'A-008', 'method': method, 'predicate_calls': len(vi
 ''', tmp_path, record_property)
 
 
-def test_pinned_limitation_a009_show_bytes_truncates_without_launch(tmp_path, record_property):
-    probe(APP + r'''
-import builtins
-import webbrowser
-b.open('/hello')
-assert isinstance(b.data, bytes)
-page = Path.cwd() / 'page.html'
-page.write_bytes(b'owned sentinel')
-launches = []
-def deny_launch(*args, **kwargs):
-    launches.append(args)
-    raise AssertionError('Desktop launch prohibited')
-webbrowser.open = deny_launch
-real_open = builtins.open
-writes = []
-def owned_open(file, mode='r', *args, **kwargs):
-    if any(flag in mode for flag in 'wax+'):
-        assert Path(file).resolve() == page
-        writes.append([str(Path(file).resolve()), mode])
-    return real_open(file, mode, *args, **kwargs)
-builtins.open = owned_open
-try:
-    b.show()
-except TypeError as error:
-    message = str(error)
-    assert message == 'write() argument must be str, not bytes'
-else:
-    raise AssertionError('Pinned limitation changed: reconcile A-009 with source-fix tests')
-finally:
-    builtins.open = real_open
-assert writes == [[str(page), 'w']]
-assert page.exists() and page.read_bytes() == b''
-assert launches == []
-print(json.dumps({'followup': 'A-009', 'exception': 'TypeError', 'message': message,
-                  'writes': writes, 'file_truncated': True, 'browser_launches': len(launches)}))
-''', tmp_path, record_property)
+def test_show_bytes_desired_save_closed_single_launch(tmp_path, record_property):
+    from .test_show_bytes_contract import EXACT_SAVE, SETUP, show_probe
+
+    show_probe(SETUP + EXACT_SAVE, tmp_path, record_property)
 
 
 def test_reset_clears_actual_cookies_only(tmp_path, record_property):

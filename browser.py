@@ -79,10 +79,14 @@ class Browser:
         return self.do_request(req)
 
     def show(self):
-        """Opens the current page in real web browser."""
-        f = open("page.html", "w")
-        f.write(self.data)
-        f.close()
+        """Save response bytes to CWD/page.html, close, then request a browser.
+
+        Overwrites any existing file; not atomic or safe for a valuable CWD.
+        Open/write/close errors propagate without launching. Untrusted HTML is
+        active content: prefer an owned temporary file and manual inspection.
+        """
+        with open("page.html", "wb") as f:
+            f.write(self.data)
 
         url = "file://" + os.path.abspath("page.html")
         webbrowser.open(url)
