@@ -30,7 +30,24 @@ raise web.HTTPError("403 Forbidden", {"Content-Type": "text/html"}, "Access deni
 
 ### Status Code Classes
 
-All status code classes are generated dynamically and follow the pattern where both uppercase (e.g., `OK`) and lowercase (e.g., `ok`) variants are available.
+Only the 2xx exception classes below are generated dynamically. Their lowercase
+names are aliases to the same classes. Redirection classes and the other public
+4xx exception classes are defined explicitly.
+
+`NotFound` / `notfound`, `InternalError` / `internalerror`, and
+`UnavailableForLegalReasons` / `unavailableforlegalreasons` are **factory functions**,
+not exception types. With no truthy message they consult the active application's
+corresponding hook (or use the default if there is no active application); an
+explicit nonempty message constructs the corresponding default HTTPError.
+Do not use these factories in an `except` clause: use `except web.HTTPError`
+(or a real exception class such as `web.BadRequest`). The tables list public
+callables, not exclusively classes.
+
+Constructing an `HTTPError` immediately sets `ctx.status` and adds its headers;
+it does not raise itself. `raise` makes the WSGI response use its `.data`.
+Returning the exception object instead stringifies its status: `return
+web.created(data="payload")` sets 201 but sends `b"201 Created"`, not the payload.
+For ordinary responses set `web.ctx.status` and return the body explicitly.
 
 #### Success Status Codes (2xx)
 
@@ -43,8 +60,19 @@ All status code classes are generated dynamically and follow the pattern where b
 
 **Example:**
 ```python
-return web.ok()  # Returns 200 OK
-return web.created()  # Returns 201 Created
+import web
+
+web.config.debug = False
+
+class SuccessExample:
+    def GET(self):
+        if web.ctx.path == "/ok":
+            raise web.ok()  # 200 with an empty body
+        raise web.created(data="Created payload", headers={"X-Result": "created"})
+
+app = web.application(("/.*", SuccessExample), {}, autoreload=False)
+response = app.request("/")
+assert (response.status, response.data) == ("201 Created", b"Created payload")
 ```
 
 #### Redirection Status Codes (3xx)
@@ -107,7 +135,10 @@ raise web.internalerror("An unexpected error occurred")
 
 ### `header(hdr, value, unique=False)`
 
-Adds an HTTP header to the response.
+Adds an HTTP header to the response. This helper rejects CR and LF in both name
+and value. Prefer it to direct `ctx.headers` mutations: the framework does not
+revalidate that list when calling WSGI `start_response`. Any additional validation
+by a particular server or middleware is outside this helper's guarantee.
 
 **Parameters:**
 - `hdr` (str): Header name (e.g., "Content-Type", "X-Custom-Header")
@@ -119,13 +150,29 @@ Adds an HTTP header to the response.
 
 **Example:**
 ```python
-web.header("Content-Type", "application/json")
-web.header("X-Request-ID", request_id, unique=True)
+import web
+
+web.config.debug = False
+
+class HeaderExample:
+    def GET(self):
+        web.header("Content-Type", "application/json")
+        web.header("X-Request-ID", "example-id", unique=True)
+        web.header("x-request-id", "not-a-replacement", unique=True)
+        return '{"ok": true}'
+
+app = web.application(("/", HeaderExample), {}, autoreload=False)
+response = app.request("/")
+assert response.headers["X-Request-ID"] == "example-id"
 ```
 
 ### `rawinput(method=None)`
 
-Returns a storage object with GET or POST arguments without processing. This is the lower-level function that `input()` uses internally.
+Returns a `storage` object with parsed GET or POST arguments, before `input()`
+selects scalar/list values and applies defaults. For URL-encoded text, values are
+lists of strings (including empty strings); combined mode gives the body precedence.
+This is parsing, not validation. Import `rawinput` from `web.webapi`: it is not in
+that module's `__all__` or the package's star exports, and `web.rawinput` is absent.
 
 **Parameters:**
 - `method` (str): Request method to parse. Options:
@@ -138,14 +185,24 @@ Returns a storage object with GET or POST arguments without processing. This is 
 
 **Example:**
 ```python
-# Get all parameters
-params = web.rawinput()
+import json
+import web
+from web.webapi import rawinput
 
-# Get only POST data
-post_data = web.rawinput("post")
+web.config.debug = False
 
-# Get only GET parameters
-get_data = web.rawinput("get")
+class RawInputExample:
+    def GET(self):
+        return json.dumps({"both": dict(rawinput()),
+                           "post": dict(rawinput("post")),
+                           "get": dict(rawinput("get"))})
+
+    POST = GET
+
+app = web.application(("/", RawInputExample), {}, autoreload=False)
+response = app.request("/?name=Z%C3%A9Z&tag=a&tag=b")
+assert response.status == "200 OK"
+assert json.loads(response.data)["get"] == {"name": ["ZéZ"], "tag": ["a", "b"]}
 ```
 
 ### `input(*requireds, **defaults)`
@@ -222,34 +279,47 @@ Sets an HTTP cookie in the response.
 **Parameters:**
 - `name` (str): Cookie name
 - `value` (str): Cookie value
-- `expires` (str/int): Expiration date (string) or days until expiration (integer). Use negative value for immediate expiration.
-- `domain` (str): Cookie domain. If not specified, uses current domain.
-- `secure` (bool): If True, cookie only sent over HTTPS
-- `httponly` (bool): If True, cookie inaccessible to JavaScript
-- `path` (str): Cookie path. Defaults to application home path.
-- `samesite` (str): SameSite attribute. Options: "strict", "lax", "none"
+- `expires` (str/int): Expiration date (string) or relative **seconds** (integer), not days. Empty string omits Expires; a negative integer requests a date far in the past for deletion.
+- `domain` (str): Optional Domain attribute. Omitted by default (a host-only cookie).
+- `secure` (bool): If True, emit Secure; defaults to False
+- `httponly` (bool): If True, emit HttpOnly; defaults to False
+- `path` (str): Cookie path. Defaults to `ctx.homepath + "/"` (root: `/`). Use the same path/domain when deleting.
+- `samesite` (str): Optional SameSite attribute: "strict", "lax", "none" (case-insensitive selection). Other values are omitted.
 
-**Example:**
+These are header attributes, not authentication or a complete CSRF policy.
+Browsers enforce cookie policy; this example only demonstrates emitted headers.
+
+**Example (standalone, offline):**
 ```python
-# Set a simple cookie
-web.setcookie("session_id", "abc123")
+import web
 
-# Set cookie with expiration (3600 seconds = 1 hour)
-web.setcookie("user_prefs", "dark_mode", expires=3600)
+web.config.debug = False
 
-# Set secure cookie
-web.setcookie("auth_token", token, secure=True, httponly=True)
+class SetCookieExample:
+    def GET(self):
+        web.setcookie("session_id", "abc123")
+        web.setcookie("user_prefs", "dark_mode", expires=3600)
+        web.setcookie("auth_token", "example-token", secure=True, httponly=True)
+        web.setcookie("csrf_token", "xyz789", samesite="strict")
+        web.setcookie("session_id", "", expires=-1)
+        return "Cookies set"
 
-# Set SameSite cookie for CSRF protection
-web.setcookie("csrf_token", "xyz789", samesite="strict")
-
-# Delete a cookie
-web.setcookie("session_id", "", expires=-1)
+app = web.application(("/", SetCookieExample), {}, autoreload=False)
+assert app.request("/").status == "200 OK"
 ```
 
 ### `parse_cookies(http_cookie)`
 
-Parses HTTP_COOKIE header into a dictionary of cookie names and decoded values.
+Parses an `HTTP_COOKIE` header into decoded Python 3 strings, not UTF-8 byte
+spellings. Import `parse_cookies` from `web.webapi`; it is absent from that
+module's `__all__`, star exports and `web.parse_cookies`.
+
+In quoted cookie syntax a raw `\n` unescapes to `n`, whereas octal `\012`
+decodes to a newline. That does **not** guarantee acceptance: the verified
+Python 3.13.5 stdlib rejects decoded control characters, and this framework's
+fallback returns `{}` for the isolated newline-bearing example below. Older
+stdlibs may accept the decoded newline. Do not use control characters in cookie
+values or treat parsing as authenticity/session validation.
 
 **Parameters:**
 - `http_cookie` (str): Raw HTTP_COOKIE header value
@@ -259,19 +329,20 @@ Parses HTTP_COOKIE header into a dictionary of cookie names and decoded values.
 
 **Examples:**
 ```python
-# Basic parsing
-web.parse_cookies('a=1')  # {'a': '1'}
-web.parse_cookies('a=1; b=2')  # {'a': '1', 'b': '2'}
+from http.cookies import SimpleCookie
+from web.webapi import parse_cookies
 
-# URL-encoded values
-web.parse_cookies('a=1%202')  # {'a': '1 2'}
+assert parse_cookies('a=1') == {'a': '1'}
+assert parse_cookies('a=1; b=2') == {'a': '1', 'b': '2'}
+assert parse_cookies('a=1%202') == {'a': '1 2'}
+assert parse_cookies('a=Z%C3%A9Z') == {'a': 'ZéZ'}
+assert parse_cookies(r'keebler="E=mc2; L=\"Loves\"; fudge=\n;"') == {
+    'keebler': 'E=mc2; L="Loves"; fudge=n;'}
 
-# Unicode values
-web.parse_cookies('a=Z%C3%A9Z')  # {'a': 'Z\xc3\xa9Z'}
-
-# Complex values with special characters
-web.parse_cookies('keebler="E=mc2; L=\\"Loves\\"; fudge=\\n;"')
-# {'keebler': 'E=mc2; L="Loves"; fudge=\n;"'}
+# Decode syntax separately from the stdlib's cookie-acceptance policy.
+assert SimpleCookie().value_decode(r'"\012"')[0] == '\n'
+# In the verified interpreter this control-bearing cookie is rejected.
+assert parse_cookies(r'keebler="E=mc2; L=\"Loves\"; fudge=\012;"') == {}
 ```
 
 ### `cookies(*requireds, **defaults)`
@@ -290,7 +361,7 @@ proof of authentication.
 **Returns:**
 - `storage`: Storage object with cookie data
 
-**Current exception limitation (tracked in web#20, WB-WEBAPI-03):**
+**Current exception limitation (source fix tracked in [web#36](https://git.home.arpa/mosaic-ai/web/issues/36); reference scope WB-WEBAPI-03):**
 A missing positional name is checked before defaults. It constructs `badrequest()`
 (setting request status to 400) but raises `StopIteration`, **not `BadRequest`**.
 An ordinary handler consequently produces HTTP 500; inside a generator Python's
@@ -348,7 +419,10 @@ web.debug({"key": "value", "nested": {"data": [1, 2, 3]}})
 
 ### `ctx`
 
-Thread-local context object containing request and response information. This is a `storage` object with the following attributes:
+Thread-local, dict-like `ThreadedDict` containing request and response information,
+with attribute access. WSGI request cleanup clears it; do not retain it as shared
+application state. URL fields derive from request metadata, not a trusted-origin
+or Host-validation policy.
 
 #### Request Information
 
@@ -356,14 +430,14 @@ Thread-local context object containing request and response information. This is
 |-----------|------|-------------|
 | `environ` (or `env`) | dict | WSGI environment variables |
 | `host` | str | Host header from request |
-| `home` | str | Base path for application |
-| `realhome` | str | Real base path (including protocol and host) |
+| `home` | str | Base URL: scheme + host + homepath; adjusted inside sub-applications |
+| `realhome` | str | Original base URL before sub-application mounting |
 | `ip` | str | Client IP address |
 | `method` | str | HTTP method used |
 | `path` | str | Request path |
 | `query` | str | Query string with '?' prefix |
 | `fullpath` | str | Full request path including query |
-| `homepath` | str | Home path without trailing slash |
+| `homepath` | str | Mount path from SCRIPT_NAME (or REAL_SCRIPT_NAME override), extended inside sub-applications; no scheme/host |
 
 #### Response Information
 
@@ -371,23 +445,56 @@ Thread-local context object containing request and response information. This is
 |-----------|------|-------------|
 | `status` | str | HTTP status code (default: "200 OK") |
 | `headers` | list | List of 2-tuples for response headers |
-| `output` | str | Response body content |
+| `output` | str | Legacy field initialized to `""`; not the WSGI response body source |
 | `data` | bytes | Raw request body data |
 | `_fieldstorage` | dict | Parsed form data (internal use) |
 | `_parsed_cookies` | dict | Parsed cookies (internal use) |
 
-**Example:**
+WSGI sends the handler result (or `.data` from a raised `HTTPError`), not
+`ctx.output`. Use `web.header()` instead of directly mutating `ctx.headers`.
+
+**Example (standalone, in-process WSGI; no listener):**
 ```python
-# Access request information
-print(web.ctx.ip)  # Client IP
-print(web.ctx.path)  # Request path
-print(web.ctx.method)  # HTTP method
+import io
+import json
+from wsgiref.util import setup_testing_defaults
+import web
 
-# Set response headers
-web.ctx.headers.append(("X-Custom-Header", "value"))
+web.config.debug = False
 
-# Set status
-web.ctx.status = "404 Not Found"
+class ContextExample:
+    def GET(self):
+        values = {name: getattr(web.ctx, name) for name in
+                  ("home", "homepath", "realhome", "path", "query", "method")}
+        values["initial_output"] = web.ctx.output
+        web.ctx.output = "legacy-not-the-body"
+        web.header("X-Custom-Header", "value")
+        web.ctx.status = "202 Accepted"
+        return json.dumps(values)
+
+app = web.application(("/resource", ContextExample), {}, autoreload=False)
+
+def environment(mount):
+    env = {}
+    setup_testing_defaults(env)
+    env.update(SCRIPT_NAME=mount, PATH_INFO="/resource", QUERY_STRING="x=1",
+               HTTP_HOST="example.test:8443", REQUEST_METHOD="GET")
+    env["wsgi.url_scheme"] = "https"
+    env["wsgi.input"] = io.BytesIO(b"")
+    return env
+
+def request(mount):
+    captured = []
+    body = b"".join(app.wsgifunc()(environment(mount),
+                   lambda status, headers: captured.append((status, list(headers)))))
+    status, headers = captured[0]
+    return status, headers, body
+
+status, headers, body = request("/mounted")
+assert status == "202 Accepted"
+assert json.loads(body)["home"] == "https://example.test:8443/mounted"
+assert json.loads(body)["homepath"] == "/mounted"
+assert b"legacy-not-the-body" not in body
 ```
 
 ## Configuration
@@ -410,14 +517,30 @@ web.config.debug = True  # Enables debugging features
 ```python
 import web
 
-# Raise HTTP errors
-raise web.notfound("Page not found")
-raise web.forbidden("Access denied")
-raise web.internalerror("Server error")
+web.config.debug = False
+observations = []
 
-# Return success status codes
-return web.ok()  # 200 OK
-return web.created()  # 201 Created
+class ErrorExample:
+    def GET(self):
+        if web.ctx.path == "/missing":
+            raise web.notfound("Page not found")
+        if web.ctx.path == "/payload":
+            web.ctx.status = "201 Created"
+            return "Payload"
+        error = web.created(data="Payload")
+        observations.append((error.args, error.data, web.ctx.status))
+        if web.ctx.path == "/raised":
+            raise error
+        if web.ctx.path == "/returned":
+            return error  # Characterization, not the recommended payload pattern
+        return "Continued"  # Construction alone does not interrupt the handler
+
+app = web.application(("/.*", ErrorExample), {}, autoreload=False)
+assert app.request("/raised").data == b"Payload"
+response = app.request("/returned")
+assert (response.status, response.data) == ("201 Created", b"201 Created")
+assert app.request("/payload").data == b"Payload"
+assert app.request("/constructed").data == b"Continued"
 ```
 
 ### Handling Input Data
@@ -427,7 +550,10 @@ requires both keys, rejects a blank username and an empty password, converts pag
 to an integer, and applies an example range of 1–100. These are explicit application
 policies, not `input()` defaults. The username is checked with `strip()` but kept
 unchanged; passwords are not stripped (a whitespace-only password is nonempty).
-This is a parsing/validation demonstration, not an authentication endpoint.
+This is a parsing/validation demonstration for URL-encoded text GET/POST, not an
+authentication endpoint or an upload validator. Multipart values require a separate
+application type/error policy; the required-upload double-read source defect is
+tracked in [web#37](https://git.home.arpa/mosaic-ai/web/issues/37).
 
 ```python
 import json
@@ -542,7 +668,7 @@ web.header("Expires", "0")
 
 The webapi module includes several security features:
 
-- **Header Validation**: All header values are validated against HTTP response splitting attacks by rejecting newline and carriage return characters
+- **Header Validation**: `header()` rejects CR/LF in names and values. Direct `ctx.headers` mutations bypass this check; the framework does not revalidate them at WSGI handoff. Use the helper. Server-specific validation is not established here; this is not evidence of a deployed exploit.
 - **Cookie Encoding**: Cookie values are properly encoded and escaped
 - **Input Processing**: Parsing and presence checks are not injection protection; apply application validation, SQL parameter binding, and output-context escaping separately (see below).
 - **SameSite Support**: Cookie SameSite attribute helps prevent CSRF attacks
@@ -566,7 +692,9 @@ This is not JavaScript or CSS escaping, nor URL-scheme validation; HTML escaping
 alone cannot make arbitrary `href`/`src` URLs or event-handler attributes safe.
 Use context-specific encoding and URL policies for those separate contexts.
 
-This standalone offline demonstration creates a fresh, owned in-memory SQLite
+This demonstration accepts URL-encoded text, not multipart uploads; see the
+separate upload limitation and type policy above. This standalone offline example
+creates a fresh, owned in-memory SQLite
 fixture per request and closes it afterward. It is not a production persistence
 pattern or a login implementation. The SQL and identifiers are fixed; even an
 apostrophe-bearing comparison-looking value is matched only as literal data.
