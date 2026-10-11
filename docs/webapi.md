@@ -150,10 +150,15 @@ get_data = web.rawinput("get")
 
 ### `input(*requireds, **defaults)`
 
-Returns a `storage` object with GET and POST arguments, with support for required parameters and defaults.
+Parses request parameters and returns a `storage` object. Positional names check
+**presence**, not nonempty values, types, authorization, or injection safety.
+For URL-encoded GET/POST data, supplied values remain strings; a default such as
+`page=1` does not convert a supplied `page` to an integer. Repeated parameters use
+the last value unless a list default (for example `tags=[]`) requests all values.
+The default combined mode lets body parameters override same-named query parameters.
 
 **Parameters:**
-- `*requireds` (str): Required parameter names. Raises `BadRequest` if missing.
+- `*requireds` (str): Required parameter names. Raises `BadRequest` if absent from the parsed request, even if that name also has a default. Present empty strings pass.
 - `**defaults`: Default values for optional parameters
   - `_method` (str): Request method ("both", "get", "post", "put", "patch")
   - `_unicode` (bool): Convert values to unicode (default: True)
@@ -165,25 +170,32 @@ Returns a `storage` object with GET and POST arguments, with support for require
 **Raises:**
 - `BadRequest`: If required parameters are missing
 
-**Example:**
+`required=["username", "password"]` is an ordinary default named `required`,
+not a validation option. Use positional names instead. Let `BadRequest` propagate
+so the application sends HTTP 400; catching it and continuing does not enforce a
+rejection. Use `_method="get"` or `_method="post"` when only one source is intended.
+
+**Example (standalone, offline presence check; not authentication):**
 ```python
-# Get all form data
-data = web.input()
+import json
+import web
 
-# Get specific parameters with defaults
-name = web.input(name="Anonymous").name
-page = web.input(page=1).page
+web.config.debug = False
 
-# Require specific parameters
-try:
-    user = web.input(required=["username", "password"])
-except web.badrequest:
-    # Handle missing required parameters
-    pass
+class InputExample:
+    def GET(self):
+        values = web.input("username", "password", name="Anonymous", page=1)
+        web.header("Content-Type", "application/json")
+        # Do not return the password. Empty values still satisfy presence.
+        return json.dumps({"username": values.username,
+                           "name": values.name, "page": values.page})
 
-# Handle POST and GET data separately
-post_data = web.input(_method="post")
-get_data = web.input(_method="get")
+    POST = GET
+
+app = web.application(("/", InputExample), {}, autoreload=False)
+assert app.request("/").status == "400 Bad Request"
+assert app.request("/?username=Alice&password=example").status == "200 OK"
+assert app.request("/?username=&password=").status == "200 OK"
 ```
 
 ### `data()`
@@ -264,34 +276,54 @@ web.parse_cookies('keebler="E=mc2; L=\\"Loves\\"; fudge=\\n;"')
 
 ### `cookies(*requireds, **defaults)`
 
-Returns a `storage` object with all request cookies, with support for required cookies and defaults.
+Returns a `storage` object with request cookies and optional defaults. As with
+`input()`, `required=[...]` only supplies a default named `required`; it does not
+require the listed cookie names. Parsed cookie values are untrusted input, not
+proof of authentication.
 
 **Parameters:**
-- `*requireds` (str): Required cookie names. Raises `BadRequest` if missing.
+- `*requireds` (str): Positional required names, but see the current exception limitation below. Present empty values satisfy this presence check.
 - `**defaults`: Default values for optional cookies
-  - `_unicode` (bool): Convert values to unicode (default: True)
+  - `_unicode` (bool): Unicode conversion option (default: False, unlike `input()`)
   - Other keys: Default values for cookies
 
 **Returns:**
 - `storage`: Storage object with cookie data
 
-**Raises:**
-- `BadRequest`: If required cookies are missing
+**Current exception limitation (tracked in web#20, WB-WEBAPI-03):**
+A missing positional name is checked before defaults. It constructs `badrequest()`
+(setting request status to 400) but raises `StopIteration`, **not `BadRequest`**.
+An ordinary handler consequently produces HTTP 500; inside a generator Python's
+PEP 479 converts the escaping exception to `RuntimeError`. Do not rely on the
+intermediate status to deliver an HTTP 400 response.
 
-**Example:**
+**Example (standalone, explicit application-level check):**
+Avoid that positional-cookie path: read without required names, check membership,
+then raise `web.badrequest` yourself. The separate nonempty check is an example
+application policy; this is not session verification or authentication.
+
 ```python
-# Get all cookies
-all_cookies = web.cookies()
+import web
 
-# Get specific cookie with default
-session_id = web.cookies(session_id="default_session").session_id
+web.config.debug = False
 
-# Require specific cookies
-try:
-    auth = web.cookies(required=["session_id", "user_id"])
-except web.badrequest:
-    # Handle missing required cookies
-    pass
+class CookieExample:
+    def GET(self):
+        values = web.cookies()
+        required = ("session_id", "user_id")
+        if any(name not in values for name in required):
+            raise web.badrequest("Missing cookie fields")
+        if any(not values[name] for name in required):
+            raise web.badrequest("Cookie fields must be nonempty")
+        web.header("Content-Type", "text/plain; charset=utf-8")
+        return "Cookie fields present"
+
+app = web.application(("/", CookieExample), {}, autoreload=False)
+assert app.request("/").status == "400 Bad Request"
+assert app.request("/", headers={"Cookie": "session_id=; user_id=7"}).status == "400 Bad Request"
+response = app.request("/", headers={"Cookie": "session_id=example; user_id=7"})
+assert response.status == "200 OK"
+assert response.data == b"Cookie fields present"
 ```
 
 ### `debug(*args)`
@@ -390,24 +422,44 @@ return web.created()  # 201 Created
 
 ### Handling Input Data
 
+Presence and application validation are separate steps. This standalone example
+requires both keys, rejects a blank username and an empty password, converts page
+to an integer, and applies an example range of 1–100. These are explicit application
+policies, not `input()` defaults. The username is checked with `strip()` but kept
+unchanged; passwords are not stripped (a whitespace-only password is nonempty).
+This is a parsing/validation demonstration, not an authentication endpoint.
+
 ```python
-# Get all form data
-data = web.input()
+import json
+import web
 
-# Get specific parameters with defaults
-name = web.input(name="Anonymous").name
-page = web.input(page=1).page
+web.config.debug = False
 
-# Require specific parameters
-try:
-    user = web.input(required=["username", "password"])
-except web.badrequest:
-    # Handle missing required parameters
-    pass
+class ValidatedInput:
+    def GET(self):
+        values = web.input("username", "password", page="1")
+        if not values.username.strip() or not values.password:
+            raise web.badrequest("Username must be nonblank and password nonempty")
+        try:
+            page = int(values.page)
+        except ValueError:
+            raise web.badrequest("Page must be an integer")
+        if not 1 <= page <= 100:
+            raise web.badrequest("Page must be between 1 and 100")
+        web.header("Content-Type", "application/json")
+        return json.dumps({"username": values.username, "page": page})
 
-# Handle POST and GET data
-post_data = web.input(_method="post")
-get_data = web.input(_method="get")
+    POST = GET
+
+app = web.application(("/", ValidatedInput), {}, autoreload=False)
+assert app.request("/").status == "400 Bad Request"
+assert app.request("/?username=&password=example").status == "400 Bad Request"
+assert app.request("/?username=Alice&password=example&page=oops").status == "400 Bad Request"
+response = app.request("/", method="POST",
+                       data="username=Alice&password=example&page=2",
+                       headers={"Content-Type": "application/x-www-form-urlencoded"})
+assert response.status == "200 OK"
+assert json.loads(response.data) == {"username": "Alice", "page": 2}
 ```
 
 ### Setting Cookies
@@ -492,9 +544,64 @@ The webapi module includes several security features:
 
 - **Header Validation**: All header values are validated against HTTP response splitting attacks by rejecting newline and carriage return characters
 - **Cookie Encoding**: Cookie values are properly encoded and escaped
-- **Input Processing**: Input data is processed safely to prevent injection attacks
+- **Input Processing**: Parsing and presence checks are not injection protection; apply application validation, SQL parameter binding, and output-context escaping separately (see below).
 - **SameSite Support**: Cookie SameSite attribute helps prevent CSRF attacks
 - **HttpOnly Support**: Cookies can be marked as HttpOnly to prevent JavaScript access
+
+### Parsing is not injection protection
+
+`input()` parses and storifies values; it leaves apostrophes and HTML metacharacters
+in supplied strings. Presence checks do not enforce nonempty values, numeric types,
+domain constraints, or authentication. Validate those rules explicitly, as in
+[Handling Input Data](#handling-input-data).
+
+Use SQL **parameter binding** for values, not string interpolation or concatenation
+into SQL. Bind parameters do not stand for table/column names or arbitrary SQL
+clauses; keep those fixed or choose from an application-owned allowlist. Bind the
+original value, not an HTML-escaped version of it.
+
+Escape at the output boundary for **HTML text** and ordinary **quoted attributes**.
+The example uses `html.escape(..., quote=True)` for text and a quoted `title` value.
+This is not JavaScript or CSS escaping, nor URL-scheme validation; HTML escaping
+alone cannot make arbitrary `href`/`src` URLs or event-handler attributes safe.
+Use context-specific encoding and URL policies for those separate contexts.
+
+This standalone offline demonstration creates a fresh, owned in-memory SQLite
+fixture per request and closes it afterward. It is not a production persistence
+pattern or a login implementation. The SQL and identifiers are fixed; even an
+apostrophe-bearing comparison-looking value is matched only as literal data.
+
+```python
+from contextlib import closing
+from html import escape
+import sqlite3
+from urllib.parse import urlencode
+import web
+
+web.config.debug = False
+
+class SafeOutput:
+    def GET(self):
+        values = web.input("name")
+        with closing(sqlite3.connect(":memory:")) as db:
+            db.execute("CREATE TABLE names (name TEXT NOT NULL)")
+            db.executemany("INSERT INTO names (name) VALUES (?)",
+                           [("Alice",), ("O'Reilly <b>&\"",)])
+            count = db.execute("SELECT COUNT(*) FROM names WHERE name = ?",
+                               (values.name,)).fetchone()[0]
+        escaped = escape(values.name, quote=True)
+        web.header("Content-Type", "text/html; charset=utf-8")
+        return ('<p title="' + escaped + '">' + escaped
+                + '</p><p>Matches: ' + str(count) + '</p>')
+
+    POST = GET
+
+app = web.application(("/", SafeOutput), {}, autoreload=False)
+response = app.request("/?" + urlencode({"name": "O'Reilly <b>&\""}))
+assert response.status == "200 OK"
+assert response.data == (b'<p title="O&#x27;Reilly &lt;b&gt;&amp;&quot;">'
+                         b'O&#x27;Reilly &lt;b&gt;&amp;&quot;</p><p>Matches: 1</p>')
+```
 
 ## See Also
 
