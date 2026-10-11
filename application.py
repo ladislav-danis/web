@@ -250,10 +250,11 @@ class application:
             else:
                 q = data
 
-            env["wsgi.input"] = BytesIO(q.encode("utf-8"))
+            body = q if isinstance(q, bytes) else q.encode("utf-8")
+            env["wsgi.input"] = BytesIO(body)
             # if not env.get('CONTENT_TYPE', '').lower().startswith('multipart/') and 'CONTENT_LENGTH' not in env:
             if "CONTENT_LENGTH" not in env:
-                env["CONTENT_LENGTH"] = len(q)
+                env["CONTENT_LENGTH"] = len(body)
         response = web.storage()
 
         def start_response(status, headers):

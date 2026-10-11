@@ -66,7 +66,7 @@ app.add_processor(log_request)
 
 ##### `browser()`
 
-Returns an `AppBrowser` instance for testing the application. GET navigation works; on the pinned Python 3 implementation, nonempty POST bodies cannot pass through the browser adapter. Use direct `app.request` with `str` or `dict` data for POST tests; see the [browser limitations](browser.md#pinned-python-3-limitations).
+Returns an `AppBrowser` instance for in-process testing, including GET navigation, cookies and POST with `bytes` bodies. Unlike direct `app.request`, `AppBrowser.open` follows urllib and rejects `str` bodies; encode text or form data explicitly. See the [browser body policy](browser.md#pinned-python-3-limitations).
 
 **Example:**
 ```python
@@ -76,12 +76,12 @@ browser.open("/hello")
 
 ##### `request(localpart: str = "/", method: str = "GET", data: Optional[Union[str, bytes, Dict[str, Any]]] = None, host: str = "0.0.0.0:8080", headers: Optional[Dict[str, str]] = None, https: bool = False, **kw: Any) -> web.storage`
 
-Simulates a request to the application for testing purposes. The signature above reproduces the source annotation, **not a guarantee that every annotated type works**. In the pinned implementation (`a540a4bd0ce90ad3cd8c2c91c9fbfd332eabb7ed`), a nonempty `bytes` body for a non-GET/HEAD request raises `AttributeError: 'bytes' object has no attribute 'encode'` before the handler runs. `None` or an empty body becomes an empty string; GET/HEAD do not use this body conversion. This source defect remains unresolved and is tracked for a separate source repair through [web#3, A-006](https://git.home.arpa/mosaic-ai/web/issues/3).
+Simulates a request to the application for testing purposes. For non-GET/HEAD methods, `bytes` are passed unchanged, `str` is encoded as UTF-8, and `dict` is URL-encoded then encoded as UTF-8. `None` and empty bodies produce empty bytes. An automatically supplied `CONTENT_LENGTH` counts the resulting bytes, not Unicode characters. Explicit `Content-Length`/`CONTENT_LENGTH` and content type are preserved; an incorrect explicit length can still truncate what the handler reads. GET/HEAD do not use this body conversion. [web#21 (A-006)](https://git.home.arpa/mosaic-ai/web/issues/21) repairs the earlier nonempty-bytes exception and Unicode length bug; this is not an iterable/file-object API extension.
 
 **Parameters:**
 - `localpart`: The full URL path (including query string), e.g., `/hello?name=world`.
 - `method`: HTTP method (GET, POST, etc).
-- `data`: For direct POST/PUT tests, use a `str` body or a `dict` (URL-encoded by the helper), not nonempty `bytes`. For form data use an ASCII URL-encoded string and an explicit content type as below. Encode repeated keys yourself with `urlencode(pairs)`; dictionary list values are not automatically expanded with `doseq=True`. This is not a general binary-upload recipe.
+- `data`: A direct POST/PUT body may be `str`, `bytes` or `dict`. Use an explicit content type for form data. Encode repeated keys yourself with `urlencode(pairs)`; dictionary list values are not automatically expanded with `doseq=True`. Raw bytes are not decoded or validated, and this helper does not construct multipart uploads.
 - `host`: Host address for the request.
 - `headers`: Dictionary of HTTP headers.
 - `https`: Whether to simulate HTTPS.
@@ -96,7 +96,7 @@ assert response.data == b"Hello, world!"
 
 ##### Direct POST workaround
 
-This standalone example exercises the real in-process application, not AppBrowser or a network server. Neither request inherits a browser cookie jar; for an authenticated/CSRF-protected application, explicitly carry the required cookie/header/token from its own session flow. Plain web.py does not add that policy automatically.
+The historical heading is retained for existing links; direct POST is now a supported API, not a workaround for rejected bytes. This standalone example exercises the real in-process application, not AppBrowser or a network server. Neither request inherits a browser cookie jar; for an authenticated/CSRF-protected application, explicitly carry the required cookie/header/token from its own session flow. Plain web.py does not add that policy automatically.
 
 ```python
 import web
@@ -119,6 +119,31 @@ raw_response = app.request('/echo', method='POST',
 assert response.status == raw_response.status == '200 OK'
 assert response.data == raw_response.data == b'hello world'
 assert received == [{'message': 'hello world'}, {'message': 'hello world'}]
+```
+
+##### Raw request bodies
+
+This standalone example needs only `web`. Binary bytes, including non-UTF-8 and NUL, are preserved; direct Unicode strings become UTF-8 bytes. These are raw bodies, not parsed forms. No network server or optional parser is involved.
+
+```python
+import web
+
+received = []
+class RawEcho:
+    def POST(self):
+        body = web.data()
+        received.append((body, str(web.ctx.env['CONTENT_LENGTH'])))
+        return body
+
+app = web.application(('/raw', RawEcho), {}, autoreload=False)
+binary = app.request('/raw', method='POST', data=b'\xff\x00A',
+                     headers={'Content-Type': 'application/octet-stream'})
+text = app.request('/raw', method='POST', data='ž😀',
+                   headers={'Content-Type': 'text/plain; charset=utf-8'})
+assert binary.status == text.status == '200 OK'
+assert binary.data == b'\xff\x00A'
+assert text.data == b'\xc5\xbe\xf0\x9f\x98\x80'
+assert received == [(b'\xff\x00A', '3'), (b'\xc5\xbe\xf0\x9f\x98\x80', '6')]
 ```
 
 ##### `handle()`

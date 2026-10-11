@@ -1,6 +1,8 @@
-"""Pinned web#3 limitations, not runtime fixes or permanent desired contracts.
+"""Retained browser boundaries and web#3 limitations.
 
-Source follow-up mapping: A-006 request/AppBrowser bodies; A-008 link callable;
+web#21 replaces the two A006 bytes cases in test_request_bytes_contract; the
+original str/urllib boundary node IDs below intentionally remain unchanged.
+Source follow-up mapping: A-008 link callable;
 A-009 show bytes. See https://git.home.arpa/mosaic-ai/web/issues/3 for tracking.
 A future source repair must replace each affected limitation assertion with a
 one-to-one reconciled desired-contract regression, not silently delete coverage.
@@ -46,11 +48,9 @@ print(json.dumps({'statuses': results, 'handler_calls': calls}))
 
 
 @pytest.mark.parametrize('client,body', [
-    ('request', b'message=hello'),
     ('AppBrowser', 'message=hello'),
-    ('AppBrowser', b'message=hello'),
     ('Browser', 'message=hello'),
-], ids=['request-bytes', 'appbrowser-str', 'appbrowser-bytes', 'browser-str'])
+], ids=['appbrowser-str', 'browser-str'])
 def test_pinned_limitation_a006_post_body(tmp_path, record_property, client, body):
     probe(APP + '\nclient = ' + repr(client) + '\nbody = ' + repr(body) + r'''
 try:
