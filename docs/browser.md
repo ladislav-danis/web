@@ -8,14 +8,14 @@ This document describes the browser testing helpers in [`browser.py`](../browser
 
 ## Pinned Python 3 Limitations
 
-The original audit at source revision `a540a4bd0ce90ad3cd8c2c91c9fbfd332eabb7ed` is tracked in [web#3](https://git.home.arpa/mosaic-ai/web/issues/3). [web#21](https://git.home.arpa/mosaic-ai/web/issues/21) repairs the A-006 application bytes bridge and Unicode byte length. The other limitations below remain unchanged; this repair does not resolve A-008 or A-009.
+The original audit at source revision `a540a4bd0ce90ad3cd8c2c91c9fbfd332eabb7ed` is tracked in [web#3](https://git.home.arpa/mosaic-ai/web/issues/3). [web#21](https://git.home.arpa/mosaic-ai/web/issues/21) repairs the A-006 application bytes bridge and Unicode byte length. [web#22](https://git.home.arpa/mosaic-ai/web/issues/22) repairs A-008 callable link filtering. A-009 and the retained str/reset boundaries below remain unchanged.
 
 - **A-006 — repaired bytes bridge, retained str boundary:** `AppBrowser.open(..., data=bytes)` now dispatches the real handler and preserves raw bytes, including non-UTF-8/NUL. `Browser.open(..., data=str)` and `AppBrowser.open(..., data=str)` still fail in urllib with `TypeError: POST data should be bytes, an iterable of bytes, or a file object. It cannot be of type str.` Encode text as UTF-8 or URL-encoded forms as ASCII bytes before calling these clients. Direct `app.request` also accepts `str` and `dict`; see [the executable direct POST example](application.md#direct-post-workaround). The AppBrowser guarantee here covers bytes, not arbitrary iterables/file objects or legacy ClientForm compatibility.
-- **A-008 — callable link predicates:** `_filter_links` calls `predicate.append(predicate)` instead of appending to its list. A truthy callable such as a lambda raises `AttributeError: 'function' object has no attribute 'append'`, even for an empty input list. The same defect affects `get_links`, `find_link` and `follow_link` with `predicate=`. Use bounded text/URL criteria or filter returned links manually, as below. This is not a limitation of `select_form`'s separate predicate handling.
+- **A-008 — repaired callable link predicates:** `_filter_links`, `get_links`, `find_link` and searching `follow_link` accept a truthy callable `predicate`. It receives each anchor surviving the supplied text/URL criteria; a truthy result accepts the anchor. Criteria are ANDed in text, text-regex, URL, URL-regex, callable order and short-circuit on rejection. Empty input returns `[]` without calling it; results preserve input order and duplicate object identities. Predicate exceptions propagate unchanged. The existing truthiness gate is retained: `None` and falsy callable objects are ignored. This repair does not change `select_form`'s separate predicate handling or provide a legacy parser.
 - **A-009 — `show()`:** responses are bytes, but `show()` opens `page.html` in text mode (`'w'`). It creates or truncates that file in the current working directory, then raises `TypeError: write() argument must be str, not bytes`, before reaching `webbrowser.open`. Avoid this helper; use an owned temporary directory and a binary write below. Do not call it in a directory containing a valuable `page.html`.
 - **A-010 — `reset()`:** clears cookies only. It preserves `path`, `url`, `_response`, `data`, `status`, selected `form` and cached `_forms`. It does not clear navigation/response state or destroy server-side sessions. Create a new `Browser()` or `app.browser()` for fresh client state; server-side isolation is separate.
 
-The two former A-006 bytes limitation assertions are replaced one-to-one by desired-success regressions. The two str/urllib boundary regressions retain their original identities. A-008/A-009 characterizations and cookie-only reset coverage remain; future source repairs must reconcile affected identities rather than silently remove assertions.
+The two former A-006 bytes limitation assertions are replaced one-to-one by desired-success regressions. The two str/urllib boundary regressions retain their original identities. The four former A-008 limitation identities (`_filter_links`, `get_links`, `find_link`, `follow_link`) are replaced one-to-one by `test_callable_links_desired_contract` with the same parameter identities. A-009 characterization, cookie-only reset, text/URL/manual filtering and the exact Markdown parser-seam regression remain; future source repairs must reconcile affected identities rather than silently remove assertions.
 
 ## Module Exports
 
@@ -55,12 +55,12 @@ Construct with `Browser()`; it owns a cookie jar and starts at `http://0.0.0.0:8
 | `get_soup()` | Requires the optional legacy `BeautifulSoup` module. |
 | `get_text(e=None)` | Extracts text with entities unquoted; without `e`, requires that same legacy parser. |
 | `_get_links()` | Obtains anchor elements through `get_soup()`. |
-| `get_links(text=None, text_regex=None, url=None, url_regex=None, predicate=None)` | Filters anchors by text/URL; callable `predicate` is broken (A-008). Requires the legacy parser. |
-| `find_link(text=None, text_regex=None, url=None, url_regex=None, predicate=None)` | First matching anchor, or `None`; same parser and predicate limits. |
-| `follow_link(link=None, text=None, text_regex=None, url=None, url_regex=None, predicate=None)` | Opens the selected anchor's href, or raises `BrowserError`; searching has the same parser and predicate limits. An explicit `link` avoids searching. |
-| `_filter_links(links, text=None, text_regex=None, url=None, url_regex=None, predicate=None)` | Filters supplied anchor-like objects; callable `predicate` is broken, even for `[]` (A-008). |
+| `get_links(text=None, text_regex=None, url=None, url_regex=None, predicate=None)` | Filters anchors by text/URL AND a truthy callable `predicate` (A-008 repaired). Requires the legacy parser. |
+| `find_link(text=None, text_regex=None, url=None, url_regex=None, predicate=None)` | First matching anchor, or `None`; supports the same criteria/callable and requires the legacy parser. Filtering evaluates all surviving candidates, not just the first match. |
+| `follow_link(link=None, text=None, text_regex=None, url=None, url_regex=None, predicate=None)` | Opens the first matching anchor's href, or raises `BrowserError`; searching supports the same criteria/callable and requires the legacy parser. An explicit `link` avoids searching and ignores search criteria. |
+| `_filter_links(links, text=None, text_regex=None, url=None, url_regex=None, predicate=None)` | Filters supplied anchor-like objects with criteria AND callable; `[]` returns `[]` without calling the predicate. No parser needed for supplied objects (A-008 repaired). |
 | `get_forms()` | Requires optional legacy `ClientForm`; returns/caches parsed form objects. |
-| `select_form(name=None, predicate=None, index=0)` | Selects a parsed form; requires ClientForm unless already cached. Its predicate is separate from the broken link predicate. |
+| `select_form(name=None, predicate=None, index=0)` | Selects a parsed form; requires ClientForm unless already cached. Its predicate handling is separate from link filtering. |
 | `submit(**kw)` | Calls selected form's `click(**kw)` then `do_request`; legacy ClientForm integration is not certified by the bytes bridge tests. |
 | `__getitem__(key)`, `__setitem__(key, value)` | Read/write fields of the selected form; do not submit or change the body policy. |
 
@@ -102,13 +102,14 @@ assert b.text == 'Hello, world!'
 
 ### Working with Links
 
-Requires a compatible **legacy `BeautifulSoup`** installation and an already loaded page containing flat anchors such as `<a href="/next">Next</a>`. This example is not applicable to the plain-text page above. `bs4` is not the imported module. Exact text compares `link.string` (not all descendant text); regex uses search, and multiple supplied criteria are ANDed. Keep URL matches bounded; a filter is not a URL safety policy.
+The namespace must supply `b`, a browser with a compatible **legacy `BeautifulSoup`** installation and an already loaded page containing flat anchors such as `<a href="/next">Next</a>`. This example is not applicable to the plain-text page above. `bs4` is not the imported module. Exact text compares `link.string` (not all descendant text); regex uses search, and multiple supplied criteria are ANDed. Keep URL matches bounded; a filter is not a URL safety policy.
 
 ```python
-# No callable predicate= argument: it is broken on this pin.
-links = b.get_links(text='Next', url_regex=r'^/next$')
-link = b.find_link(url='/next')
-# Apply custom predicates in user code to the returned anchors instead.
+# Callable results are ANDed with the bounded text/URL criteria.
+links = b.get_links(text='Next', url_regex=r'^/next$',
+                    predicate=lambda candidate: candidate.get('href') == '/next')
+link = b.find_link(url='/next', predicate=lambda candidate: candidate.string == 'Next')
+# Manual filtering and following an explicit anchor remain supported alternatives.
 selected = [candidate for candidate in links if candidate.get('href') == '/next']
 if selected:
     b.follow_link(link=selected[0])
@@ -177,7 +178,7 @@ The [method table](#method-table) is the canonical signature/behavior list; the 
 
 - **Requests:** `open`/`do_request` store `url`, `path`, `data`, `status`, `_response`, clear cached `_forms` and set `form = None` on success. GET and bytes POST work in AppBrowser; strings still fail in urllib (A-006). `submit` goes through the same bridge and additionally depends on a compatible legacy form object.
 - **Response inspection:** `get_response()` returns a new file-like body copy. `show()` is not a safe save/preview helper for bytes on this pin (A-009); use the binary temporary-file recipe.
-- **Links:** `_get_links`/`get_links`/`find_link`/searching `follow_link` depend on legacy BeautifulSoup. Text/URL exact and regex filters work with suitable anchor objects. Callable `predicate=` is broken in all link-filter entry points (A-008). Use manual list filtering, then `follow_link(link=...)`; no match returns `[]`/`None` or raises `BrowserError` when following.
+- **Links:** `_get_links`/`get_links`/`find_link`/searching `follow_link` depend on legacy BeautifulSoup. Text/URL exact and regex filters work with suitable anchor objects. A truthy callable `predicate=` runs after the built-in filters and is ANDed with them (A-008 repaired); `None`/falsy callable objects are ignored. Exceptions propagate, and order/duplicates are preserved. Manual list filtering followed by `follow_link(link=...)` is also supported; no match returns `[]`/`None` or raises `BrowserError` when following.
 - **Forms:** `get_forms` parses with ClientForm and caches results. `select_form` filters by name/predicate and selects by index; field access delegates to that selected form. This API description is not certification of legacy ClientForm integration; the manually encoded bytes example above does not use that dependency.
 - **Reset:** `reset()` only calls `cookiejar.clear()`. Path/URL, response/body/status and selected/cached forms remain (A-010). Start a new client for fresh client state.
 

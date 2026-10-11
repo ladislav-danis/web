@@ -2,8 +2,9 @@
 
 web#21 replaces the two A006 bytes cases in test_request_bytes_contract; the
 original str/urllib boundary node IDs below intentionally remain unchanged.
-Source follow-up mapping: A-008 link callable;
-A-009 show bytes. See https://git.home.arpa/mosaic-ai/web/issues/3 for tracking.
+Source repair web#22 replaces the four A-008 callable-link limitations one-to-one
+with desired-success regressions. A-009 show bytes remains unchanged.
+See https://git.home.arpa/mosaic-ai/web/issues/3 for historical tracking.
 A future source repair must replace each affected limitation assertion with a
 one-to-one reconciled desired-contract regression, not silently delete coverage.
 All probes use actual framework requests in fresh Core/network-denied processes.
@@ -104,22 +105,44 @@ b.open('/')
 
 
 @pytest.mark.parametrize('method', ['_filter_links', 'get_links', 'find_link', 'follow_link'])
-def test_pinned_limitation_a008_callable_links(tmp_path, record_property, method):
-    probe(APP + PARSER_SEAM + '\nmethod = ' + repr(method) + r'''
+def test_callable_links_desired_contract(tmp_path, record_property, method):
+    from .test_link_predicate_contract import predicate_probe
+
+    predicate_probe(APP + r'''
+gets = []
+original_get = Page.GET
+def tracked_get(self):
+    gets.append([web.ctx.method, web.ctx.path])
+    return original_get(self)
+Page.GET = tracked_get
+''' + PARSER_SEAM + '\nmethod = ' + repr(method) + r'''
+# Retain one parsed response so object identity, not just equal hrefs, is tested.
+soup = b.get_soup()
+b.get_soup = lambda: soup
+anchors = soup.anchors
 visited = []
-predicate = lambda link: visited.append(link) or True
-args = ([],) if method == '_filter_links' else ()
-try:
-    getattr(b, method)(*args, predicate=predicate)
-except AttributeError as error:
-    message = str(error)
-    assert message == "'function' object has no attribute 'append'"
+def predicate(link):
+    visited.append(link)
+    return link.get('href') == '/next'
+if method == '_filter_links':
+    assert b._filter_links([], predicate=predicate) == []
+    assert visited == []
+    result = b._filter_links(anchors, predicate=predicate)
 else:
-    raise AssertionError('Pinned limitation changed: reconcile A-008 with source-fix tests')
-assert visited == []
-assert b.path == '/'
-print(json.dumps({'followup': 'A-008', 'method': method, 'exception': 'AttributeError',
-                  'message': message, 'predicate_calls': len(visited),
+    result = getattr(b, method)(predicate=predicate)
+assert len(visited) == 2 and all(a is e for a, e in zip(visited, anchors))
+if method in ('_filter_links', 'get_links'):
+    assert len(result) == 1 and result[0] is anchors[0]
+elif method == 'find_link':
+    assert result is anchors[0]
+else:
+    assert result.read() == b.data == b'<a href="/next">Next</a><a href="/other">Other</a>'
+    assert result.geturl() == b.url == 'http://0.0.0.0:8080/next'
+    assert b.path == '/next' and b.status == 200
+assert gets == ([['GET', '/'], ['GET', '/next']] if method == 'follow_link' else [['GET', '/']])
+assert b.path == ('/next' if method == 'follow_link' else '/')
+print(json.dumps({'repair': 'A-008', 'method': method, 'predicate_calls': len(visited),
+                  'GETs': gets, 'selected_href': '/next',
                   'scope': 'real link methods; stdlib parser seam; limited integration'}))
 ''', tmp_path, record_property)
 

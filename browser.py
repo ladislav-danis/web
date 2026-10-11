@@ -184,7 +184,7 @@ class Browser:
                 lambda link: re_compile(url_regex).search(link.get("href", ""))
             )
         if predicate:
-            predicate.append(predicate)
+            predicates.append(predicate)
 
         def f(link):
             for p in predicates:
