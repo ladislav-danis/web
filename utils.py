@@ -221,8 +221,8 @@ class Counter(storage):
         return [k for k, v in iteritems(self) if v == m]
 
     def least(self):
-        """Returns the keys with minimum count."""
-        m = min(self.itervalues())
+        """Return all keys tied for minimum count; empty counters raise ValueError."""
+        m = min(itervalues(self))
         return [k for k, v in iteritems(self) if v == m]
 
     def percent(self, key):
@@ -580,8 +580,9 @@ def uniq(seq, key=None):
 
 def iterview(x):
     """
-    Takes an iterable `x` and returns an iterator over it
-    which prints its progress to stderr as it iterates through.
+    Takes a sized iterable `x` and lazily yields its values with progress on stderr.
+    An empty input ends without output. Unsized iterators require explicit
+    materialization; len(x) raises TypeError before any values are consumed.
     """
     WIDTH = 70
 
@@ -621,6 +622,8 @@ def iterview(x):
 
     starttime = time.time()
     lenx = len(x)
+    if lenx == 0:
+        return
     for n, y in enumerate(x):
         sys.stderr.write("\r" + format(starttime, n, lenx))
         yield y
@@ -870,7 +873,8 @@ def restack(stack, index=0):
 
 def listget(lst, ind, default=None):
     """
-    Returns `lst[ind]` if it exists, `default` otherwise.
+    Return a sized sequence's item at integer index `ind`, or `default` when
+    out of range (including negative indexes). Non-IndexError failures propagate.
 
         >>> listget(['a'], 0)
         'a'
@@ -880,7 +884,10 @@ def listget(lst, ind, default=None):
     """
     if len(lst) - 1 < ind:
         return default
-    return lst[ind]
+    try:
+        return lst[ind]
+    except IndexError:
+        return default
 
 
 def intget(integer: Any, default: Any = None) -> Any:

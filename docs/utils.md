@@ -25,12 +25,30 @@ A dictionary subclass that keeps count of how many times items are added.
 
 **Methods:**
 - `add(n)`: Increments count for item `n`
-- `most()`: Returns keys with maximum count
-- `least()`: Returns keys with minimum count
-- `percent(key)`: Returns what percentage a certain key is of all entries
+- `most()`: Returns all keys tied for maximum count
+- `least()`: Returns all keys tied for minimum count
+- `percent(key)`: Returns `float(self[key]) / sum(self.values())`, a fraction,
+  not a percentage number. Multiply by 100 for percent. It is in 0..1 only
+  for nonnegative counts with a positive total. Arbitrary assigned counts can
+  give values outside that range; a zero total raises `ZeroDivisionError`,
+  and a missing key raises `KeyError`.
 - `sorted_keys()`: Returns keys sorted by value
 - `sorted_values()`: Returns values sorted by value
 - `sorted_items()`: Returns items sorted by value
+
+Both `most()` and `least()` raise `ValueError` on an empty counter.
+These examples are standalone Python 3 code:
+
+```python
+from web.utils import Counter
+
+c = Counter(a=3, b=1, c=1)
+assert c.least() == ['b', 'c']
+assert c.most() == ['a']
+shares = Counter(a=3, b=1)
+assert shares.percent('a') == 0.75
+assert 100 * shares.percent('a') == 75.0
+```
 
 ### `IterBetter`
 An iterator wrapper that allows both iteration and indexed access.
@@ -62,23 +80,24 @@ Creates a `storage` object from a dictionary, handling special cases like lists 
 - `_unicode=False`: If True, converts strings to unicode using `safeunicode`
 
 **Behavior:**
-- If a value is a list, returns the last element unless the key appears in `defaults` as a list
-- If a value has a `value` attribute, returns that value unless the key appears in `defaults` as a dictionary
+- The return value is always the outer `Storage`; the following conversions
+  describe its **items**, not the outer object.
+- A nonempty list item becomes its last element unless its default is a list.
+- An object with a `value` attribute becomes that value unless its default is
+  a dictionary (file-like values with `file` and `raw` have special handling).
 
 **Examples:**
 ```python
-# Basic usage
-storify({'a': 1, 'c': 3}, b=2, c=0)  # Returns storage({'a': 1, 'b': 2, 'c': 3})
+from web.utils import Storage, storage, storify
 
-# List handling - returns last element
-storify({'a': [1, 2]}).a  # Returns 2
-
-# List handling with default - returns full list
-storify({'a': [1, 2]}, a=[])  # Returns [1, 2]
-
-# Object with value attribute
-storify({'a': storage(value=1)}).a  # Returns 1
-storify({'a': storage(value=1)}, a={})  # Returns <Storage {'value': 1}>
+outer = storify({'a': 1, 'c': 3}, b=2, c=0)
+assert isinstance(outer, Storage)
+assert outer == {'a': 1, 'b': 2, 'c': 3}
+assert storify({'a': [1, 2]}).a == 2
+assert storify({'a': [1, 2]}, a=[]).a == [1, 2]
+inner = storage(value=1)
+assert storify({'a': inner}).a == 1
+assert storify({'a': inner}, a={}).a is inner
 ```
 
 ### `rstrips(text, remove)`
@@ -91,10 +110,25 @@ Removes the string `remove` from the left side of `text`.
 Removes the string `remove` from both sides of `text`.
 
 ### `safestr(obj, encoding="utf-8")`
-Converts any object to a UTF-8 encoded string.
+Normally returns `str(obj)`, not encoded bytes or decoded text. The `encoding`
+argument is ignored. For a truthy object with `__next__`, it instead eagerly
+consumes the object and returns a **list** of recursive `safestr` conversions.
+A normal list or tuple is stringified; this special case is not general iterable
+conversion. Use `bytes.decode(encoding)` explicitly when decoding is intended.
+
+```python
+from web.utils import safestr, safeunicode
+
+assert safestr(b'abc') == "b'abc'"
+assert safestr(b'abc', encoding='not-a-codec') == "b'abc'"
+assert safestr(iter([1, b'abc'])) == ['1', "b'abc'"]
+assert safestr([1, 2]) == '[1, 2]'
+assert b'abc'.decode('utf-8') == 'abc'
+assert safeunicode is safestr
+```
 
 ### `safeunicode(obj, encoding="utf-8")`
-Alias for `safestr` (Python 3 compatibility).
+Alias for `safestr`, including its ignored encoding and iterator-to-list behavior.
 
 ### `timelimit(timeout)`
 Decorator that limits function execution time to `timeout` seconds, raising `RuntimeError` if it takes longer.
@@ -125,14 +159,21 @@ Memoizes a function's return values with optional expiration and background upda
 Memoized version of `re.compile`. Useful for frequently used regex patterns.
 
 ### `group(seq, size)`
-Groups sequence elements into sublists of specified size.
+Groups a sized, sliceable sequence using `len(seq)` and `seq[i:i + size]`.
+For the usual positive integer `size`, the last chunk may be shorter.
 
-**Returns:** An iterator over lists of length `size` from the iterable.
+**Returns:** A generator of slices: lists for list input, tuples for tuple input,
+strings for string input. It does not support arbitrary iterables. Explicitly
+materialize a finite iterator first if that memory/consumption cost is intended.
 
 **Example:**
 ```python
-list(group([1,2,3,4], 2))  # [[1, 2], [3, 4]]
-list(group([1,2,3,4,5], 2))  # [[1, 2], [3, 4], [5]]
+from web.utils import group
+
+assert list(group([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
+assert list(group((1, 2, 3), 2)) == [(1, 2), (3,)]
+assert list(group('abc', 2)) == ['ab', 'c']
+assert list(group(list(iter([1, 2, 3])), 2)) == [[1, 2], [3]]
 ```
 
 ### `uniq(seq, key=None)`
@@ -149,16 +190,31 @@ uniq(["Foo", "foo", "bar"], key=lambda s: s.lower())  # ['Foo', 'bar']
 ```
 
 ### `iterview(x)`
-Returns an iterator that shows progress to stderr during iteration.
+Returns a lazy generator over a **sized** iterable, displaying progress on
+stderr. Values are yielded unchanged, and the completion line is written when
+the generator is exhausted, not merely when its last value has been yielded.
+An empty sized input exhausts normally with no progress output.
 
 **Parameters:**
-- `x`: Iterable to iterate over
+- `x`: Iterable with an accurate `len(x)`. Length is read on first advancement;
+  an unsized iterator raises `TypeError` before consuming values. To use a finite
+  unsized iterator, explicitly materialize it as a list (which consumes it and
+  uses memory). Length must remain consistent during iteration.
 
 **Example:**
 ```python
-for item in iterview(range(100)):
-    # Process item with progress displayed on stderr
-    process(item)
+import contextlib
+import io
+from web.utils import iterview
+
+stderr = io.StringIO()
+with contextlib.redirect_stderr(stderr):
+    assert list(iterview([])) == []
+assert stderr.getvalue() == ''
+with contextlib.redirect_stderr(stderr):
+    assert list(iterview(list(iter([10, 20])))) == [10, 20]
+assert '100.0% (2/2)' in stderr.getvalue()
+assert stderr.getvalue().endswith('\n')
 ```
 
 ### `safeiter(it, cleanup=None, ignore_errors=True)`
@@ -324,18 +380,28 @@ x  # [2, 3, 4, 1]
 ```
 
 ### `listget(lst, ind, default=None)`
-Returns `lst[ind]` if it exists, `default` otherwise.
+Returns `lst[ind]` for a valid integer index, including valid negative indexes.
+Returns the exact `default` object for out-of-range positive **or negative**
+indexes. `TypeError` and other non-`IndexError` failures are not suppressed.
+This is a sized-sequence/integer-index helper, not a generic indexing adapter;
+its existing length/comparison gate is not a general index validation policy.
 
 **Parameters:**
-- `lst`: List to access
-- `ind`: Index to access
+- `lst`: Sized sequence, such as a list, tuple, or string
+- `ind`: Integer index
 - `default`: Default value if index out of range
 
 **Example:**
 ```python
-listget(['a'], 0)  # 'a'
-listget(['a'], 1)  # None
-listget(['a'], 1, 'b')  # 'b'
+from web.utils import listget
+
+assert listget(['a'], 0) == 'a'
+assert listget(('a', 'b'), -1) == 'b'
+assert listget('ab', -2) == 'a'
+assert listget(['a'], 1) is None
+default = object()
+assert listget(['a'], 1, default) is default
+assert listget(['a'], -2, default) is default
 ```
 
 ### `intget(integer, default=None)`
@@ -450,36 +516,73 @@ cond(x % 2 == 0, "even", "odd") + '_row'  # 'even_row'
 ```
 
 ### `capturestdout(func)`
-Captures everything `func` prints to stdout and returns it instead.
+Alias of the `CaptureStdout` class. Construction returns a callable wrapper
+without calling `func`. Calling the wrapper captures what `func` prints to
+stdout; it discards the function's return value. Stdout is restored even when
+the function raises, and the exception propagates.
 
 **Parameters:**
 - `func`: Function to capture output from
 
-**Returns:** String containing captured stdout
+**Returns:** `capturestdout(func)` returns a `CaptureStdout` instance;
+`capturestdout(func)(*args, **kwargs)` returns the captured string on success.
 
 **WARNING:** Not threadsafe!
 
 **Example:**
 ```python
+from web.utils import CaptureStdout, capturestdout
+
 def idiot():
     print("foo")
-capturestdout(idiot)()  # 'foo\n'
+    return 42
+
+wrapper = capturestdout(idiot)
+assert isinstance(wrapper, CaptureStdout) and callable(wrapper)
+assert wrapper() == 'foo\n'
 ```
 
 ### `profile(func)`
-Profiles `func` and returns a tuple containing its output
-and a string with human-readable profiling information.
+Alias of the `Profile` class. Construction returns a callable wrapper without
+running `func`. Calling that wrapper runs the function with real `cProfile`.
 
 **Parameters:**
 - `func`: Function to profile
 
-**Returns:** Tuple of (function_result, profiling_info_string)
+**Returns:** `profile(func)` returns a `Profile` instance;
+`profile(func)(*args)` returns `(function_result, profiling_info_string)` on
+success. Keyword arguments are not forwarded by this wrapper. Report timings
+are measurements, not stable example outputs.
+
+The current implementation creates a temporary file and removes it on success,
+but can leak it when profiling raises (known separately as web#27). This example
+uses an owned temporary directory with cleanup even on failure; it does not
+repair that runtime limitation. Changing `tempfile.tempdir` is process-global:
+run this recipe in a standalone process, not a concurrent request handler.
 
 **Example:**
 ```python
-import time
-out, inf = profile(time.sleep)(.001)
-inf[:10].strip()  # 'took 0.0'
+import tempfile
+from pathlib import Path
+from web.utils import Profile, profile
+
+def identity(value):
+    return value
+
+wrapper = profile(identity)
+assert isinstance(wrapper, Profile) and callable(wrapper)
+old_tempdir = tempfile.tempdir
+with tempfile.TemporaryDirectory() as directory:
+    try:
+        tempfile.tempdir = directory
+        value = object()
+        out, info = wrapper(value)
+        assert out is value and isinstance(info, str)
+        assert 'took ' in info and 'function calls' in info
+        assert list(Path(directory).iterdir()) == []
+    finally:
+        tempfile.tempdir = old_tempdir
+assert not Path(directory).exists()
 ```
 
 ### `tryall(context, prefix=None)`
@@ -550,16 +653,28 @@ Attachments can be:
 - Dictionary with `filename`, `content`, and optionally `content_type` keys
 
 **Email Configuration:**
-If `web.config.smtp_server` is set, it will send the message
-to that SMTP server. Otherwise it will look for
-`/usr/sbin/sendmail`, the typical location for the sendmail-style
-binary. To use sendmail from a different path, set `web.config.sendmail_path`.
+Selection is ordered, using the actual values in `web.config`:
+
+1. A **truthy** `smtp_server` selects SMTP, even if `email_engine` is `"aws"`.
+   Presence alone is insufficient: `""`, `False`, and `None` do not select SMTP.
+2. Otherwise, `email_engine == "aws"` selects AWS SES via the optional
+   `boto.ses.SESConnection` (`aws_access_key_id` / `aws_secret_access_key`).
+   This is the legacy `boto` package, not `boto3`; it must be installed/configured
+   separately. No fallback to sendmail occurs if the selected backend fails.
+3. Otherwise, a subprocess uses `sendmail_path` (default `/usr/sbin/sendmail`).
+   The path must identify a working sendmail-compatible program.
+
+The helper returns `None` on normal completion. This reference and its offline
+examples do **not** certify live SMTP, AWS credentials/service availability, or
+sendmail delivery. They use only synthetic payloads and inert recording seams;
+no real message, network connection, or subprocess is launched.
 
 ## Constants
 
 ### `__all__`
 List of public functions and classes exported by this module:
 - Storage, storage
+- storify
 - Counter, counter
 - iters
 - rstrips, lstrips, strips
@@ -584,9 +699,34 @@ List of public functions and classes exported by this module:
 - to36
 - sendmail
 
+The names above are exported through the package root too:
+
+```python
+import web
+from web import utils
+
+namespace = {}
+exec('from web.utils import *', namespace)
+assert set(namespace) - {'__builtins__'} == set(utils.__all__)
+assert 'storify' in utils.__all__
+for name in utils.__all__:
+    assert namespace[name] is getattr(utils, name) is getattr(web, name)
+```
+
 ### `iters`
-A list of iterable items (like lists, but not strings). Includes whichever
-of lists, tuples, sets, and Sets are available in this version of Python.
+A tuple-subclass (`_hack`) instance containing exactly `list`, `tuple`, `set`,
+and `frozenset`, suitable as the second argument of `isinstance`. It is not a
+list of values, an iterator, or a test for all possible iterables.
+
+```python
+from web.utils import iters
+
+assert isinstance(iters, tuple) and type(iters) is not tuple
+assert iters == (list, tuple, set, frozenset)
+assert isinstance([], iters)
+assert not isinstance('abc', iters)
+assert not isinstance(iter([]), iters)
+```
 
 ## Usage Examples
 
@@ -637,21 +777,45 @@ print(datestr(past, now))  # '2 hours ago'
 ```
 
 ### Email Sending
+Standalone offline dispatch/MIME example. Only the three transport methods are
+replaced; `sendmail`, MIME construction and backend selection are real. All
+patches are restored on exit. This is a recording seam, **not a delivery recipe**.
+
 ```python
-# Send simple email
-sendmail('sender@example.com', 'recipient@example.com',
-         'Subject', 'Message body')
+from email import message_from_string
+from unittest.mock import patch
+import web
+from web.utils import _EmailMessage, sendmail, storage
 
-# Send with attachments
-sendmail('sender@example.com', 'recipient@example.com',
-         'Subject', 'Message body', attachments=['file.pdf'])
+records = []
+def record(backend):
+    def transport(mail, text):
+        records.append((backend, mail.from_address, mail.recipients, text))
+    return transport
 
-# Send with multiple recipients and CC
-sendmail('sender@example.com', ['to1@example.com', 'to2@example.com'],
-         'Subject', 'Message body', cc=['cc@example.com'])
-
-# Send with file object attachment
-with open('document.pdf', 'rb') as f:
-    sendmail('sender@example.com', 'recipient@example.com',
-             'Subject', 'Message body', attachments=[f])
+with patch.object(_EmailMessage, 'send_with_smtp', record('smtp')), \
+     patch.object(_EmailMessage, 'send_with_aws', record('aws')), \
+     patch.object(_EmailMessage, 'default_email_sender', record('sendmail')):
+    for settings, expected in [
+        (storage(smtp_server='smtp.invalid', email_engine='aws'), 'smtp'),
+        (storage(smtp_server='', email_engine='aws'), 'aws'),
+        (storage(), 'sendmail'),
+    ]:
+        with patch.object(web.webapi, 'config', settings):
+            result = sendmail('sender@example.invalid', 'to@example.invalid',
+                'Synthetic subject', 'Harmless body', cc=['cc@example.invalid'],
+                attachments=[{'filename': 'sample.bin', 'content': b'harmless',
+                              'content_type': 'application/octet-stream'}])
+        assert result is None
+        backend, sender, recipients, text = records[-1]
+        assert backend == expected and sender == 'sender@example.invalid'
+        assert recipients == ['to@example.invalid', 'cc@example.invalid']
+        message = message_from_string(text)
+        assert message['Subject'] == 'Synthetic subject'
+        assert message.is_multipart()
+        body, attachment = message.get_payload()
+        assert body.get_payload(decode=True) == b'Harmless body'
+        assert attachment.get_filename() == 'sample.bin'
+        assert attachment.get_payload(decode=True) == b'harmless'
+assert len(records) == 3
 ```
