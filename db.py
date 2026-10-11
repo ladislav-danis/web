@@ -39,10 +39,9 @@ __all__ = [
     "DB",
 ]
 
-# Pattern for valid SQL identifiers: letters, digits, underscores;
-# must start with a letter or underscore; no spaces or special chars.
-# Also allows double-quoted identifiers like "table name".
-_SQL_IDENTIFIER_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$|^".*"$')
+# One ASCII bare identifier or one double-quoted token with doubled quotes.
+# Full-string matching rejects trailing data; quoted LF and NUL are excluded.
+_SQL_IDENTIFIER_RE = re.compile(r'[a-zA-Z_][a-zA-Z0-9_]*|"(?:[^"\n\x00]|"")*"')
 
 
 class SQLInjectionError(Exception):
@@ -52,16 +51,17 @@ class SQLInjectionError(Exception):
 
 
 def _sql_safe_identifier(name):
-    """Validate that a name is a safe SQL identifier.
+    """Validate one complete DML table/column identifier.
 
-    Raises SQLInjectionError if the name contains characters that could
-    be used for SQL injection (e.g., spaces, semicolons, quotes, etc.).
+    Accept an ASCII letter or underscore followed by ASCII letters, digits or
+    underscores, or one double-quoted token whose interior quotes are doubled.
+    Quoted content may be empty and contain Unicode, spaces or punctuation,
+    but not LF or NUL. Non-strings, malformed quotes and trailing data raise
+    SQLInjectionError.
 
-    Accepts:
-    - Simple identifiers: ``users``, ``user_data``, ``_private``
-    - Double-quoted identifiers: ``"table name"``, ``"user-data"``
-
-    Returns the validated name unchanged.
+    Return the input unchanged, without escaping, quoting or trimming it.
+    This check does not protect raw SQL expressions or certify backend dialects;
+    prefer fixed application identifiers or an allowlist for user choices.
     """
     if not isinstance(name, str):
         raise SQLInjectionError(
@@ -69,10 +69,11 @@ def _sql_safe_identifier(name):
         )
     if not name:
         raise SQLInjectionError("Table/column name must not be empty")
-    if not _SQL_IDENTIFIER_RE.match(name):
+    if not _SQL_IDENTIFIER_RE.fullmatch(name):
         raise SQLInjectionError(
             f"Invalid SQL identifier: {name!r}. "
-            "Only alphanumeric characters, underscores, and double quotes are allowed."
+            "Expected an ASCII identifier or one double-quoted identifier "
+            "with doubled interior quotes and no LF or NUL."
         )
     return name
 

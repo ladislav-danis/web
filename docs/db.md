@@ -219,19 +219,30 @@ The DML builders use the internal `_sql_safe_identifier` helper. Failed checks
 raise `SQLInjectionError`, available as `web.db.SQLInjectionError` or via
 `from web.db import SQLInjectionError`; it is **not** star-exported.
 
-The helper rejects non-strings and the empty string, then applies `.match()`
-to exactly `^[a-zA-Z_][a-zA-Z0-9_]*$|^".*"$`. The first alternative accepts an
-ASCII letter or underscore followed by ASCII letters, digits or underscores.
-Thus `users`, `_private` and `user_data2` pass, while `public.users`, unquoted
-spaces, hyphens and non-ASCII names fail. The second alternative accepts a
-string enclosed in double quotes, including `"table name"`, **empty quoted
-content**, embedded quotes and punctuation. `.` does not match a newline;
-Python's `$` can match just before a final newline, so even `users\n` passes.
-The helper returns the input unchanged: it does not escape quotes, verify SQL
-syntax or parse a single SQL identifier. Double-quoted acceptance is **not a
-security guarantee**. Keep identifiers application-controlled (for user choices,
-map a bounded allowlist to fixed identifiers); do not quote arbitrary input and
-assume that passing this check makes it safe.
+The helper rejects non-strings and the empty unquoted string. It accepts exactly
+one complete identifier, in either of these forms:
+
+- An ASCII letter or underscore followed by ASCII letters, digits or underscores:
+  `users`, `_private` and `user_data2`. Unquoted `public.users`, spaces, hyphens
+  and non-ASCII names are rejected.
+- A double-quoted token with every interior double quote encoded as a doubled
+  quote: `"table name"`, `"user-data"`, `"café"` or `"a"";--"`. Spaces, Unicode,
+  punctuation, semicolons and comment-like characters **inside** the token are
+  name content, not SQL code. Empty quoted content (`""`) remains accepted.
+  Quoted LF and NUL are rejected; quoted CR and tab remain accepted.
+
+The entire string must match: no leading/trailing data, whitespace or final
+newline is discarded. Unbalanced or undoubled interior quotes are rejected.
+The helper returns the input unchanged; it does not escape, quote or trim it.
+This intentionally tightens the former permissive quoted check: `"a"; "b"`,
+`"users" WHERE 1=1 --"`, final LF after a bare or quoted identifier, and quoted
+NUL no longer pass. Previously valid single-token quoted names remain accepted;
+internal LF was not supported before and is not newly supported.
+
+This bounded token grammar is not a guarantee of validity in every backend's
+SQL dialect. Keep identifiers application-controlled (for user choices, map a
+bounded allowlist to fixed identifiers). Raw SQL is not protected by this check;
+do not treat quoting arbitrary input as a substitute for an allowlist.
 
 | Method | Fields checked, ordering and exceptions |
 | --- | --- |
@@ -247,7 +258,9 @@ SQL with a database. `multiple_insert` retains its early-return/delegation
 behavior in test mode: fallback returns a list of queries, or `None` with
 `seqname=False`; optimized mode returns one query. Python's `**kwargs` boundary
 itself rejects non-string column keys in insert/update and delegated inserts;
-optimized `multiple_insert` checks its first-row keys directly.
+optimized `multiple_insert` checks its first-row keys directly. Validation is
+per statement, not an atomic whole-batch preflight: fallback `multiple_insert`
+can insert earlier valid rows before a later row's invalid column raises.
 
 WHERE handling is separate. `delete` with `where=''` or `{}` omits WHERE and
 can delete **all rows**; `where=None` is not supported by the base delete/update
@@ -286,6 +299,15 @@ try:
     assert db.delete('"user data"', where='id=$id', vars={'id': 999}) == 0
     remaining_names = [row.name for row in db.select('"user data"', order='id')]
     assert remaining_names == ['updated', 'second', 'third']
+
+    for test_mode in (False, True):
+        try:
+            db.delete('"user data" WHERE 1=1 --"', where='id=999', _test=test_mode)
+        except SQLInjectionError:
+            pass  # Rejected as more than one quoted identifier.
+        else:
+            raise AssertionError('Malformed quoted identifier was accepted')
+        assert [row.name for row in db.select('"user data"', order='id')] == remaining_names
 
     try:
         db.insert('public.users', name='x', _test=True)

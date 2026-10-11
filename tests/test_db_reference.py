@@ -150,14 +150,14 @@ def sqlite_db(tmp_path):
         connection.close()
 
 
-def test_identifier_regex_matches_actual_boundaries():
-    from web.db import _SQL_IDENTIFIER_RE, _sql_safe_identifier, SQLInjectionError
-    assert _SQL_IDENTIFIER_RE.pattern == r'^[a-zA-Z_][a-zA-Z0-9_]*$|^".*"$'
+def test_identifier_grammar_matches_actual_boundaries():
+    from web.db import _sql_safe_identifier, SQLInjectionError
     for name in ('users', '_private', 'User_2', '"table name"', '"user-data"',
-                 '""', '"a"; "b"', 'users\n', '"users"\n'):
+                 '""'):
         assert _sql_safe_identifier(name) == name
     for name in ('public.users', '', None, 3, b'users', '9users', 'café',
-                 '"a\nb"', 'users\nextra', 'users;DROP TABLE users'):
+                 '"a\nb"', 'users\nextra', 'users;DROP TABLE users',
+                 '"a"; "b"', 'users\n', '"users"\n'):
         with pytest.raises(SQLInjectionError):
             _sql_safe_identifier(name)
 
