@@ -58,6 +58,12 @@ class SessionTamperedError(SessionError):
     pass
 
 
+class SessionLegacyRejected(SessionTamperedError):
+    """Raised for recognized unsigned legacy data, without deserializing it."""
+
+    pass
+
+
 class SessionExpired(web.HTTPError):
     def __init__(self, message):
         web.HTTPError.__init__(self, "200 OK", {}, data=message)
@@ -138,9 +144,15 @@ class Session:
 
         self._check_expiry()
         if self.session_id:
-            d = self.store[self.session_id]
-            self.update(d)
-            self._validate_ip()
+            try:
+                d = self.store[self.session_id]
+            except SessionLegacyRejected:
+                # Never reuse an unsigned identity or its request-local fields.
+                self._data.clear()
+                self.session_id = None
+            else:
+                self.update(d)
+                self._validate_ip()
 
         if not self.session_id:
             self.session_id = self._generate_session_id()
@@ -288,29 +300,9 @@ class Store:
 
         decoded = decodebytes(session_data)
 
-        # P0-2 backward compatibility: detect old pickle format
-        # Pickle data typically starts with \x80 (protocol marker) or \x8a (binary flag)
-        # JSON data starts with { or [
-        if len(decoded) > 0 and decoded[0:1] in (b"\x80", b"\x8a", b"\x90"):
-            # Old pickle format - migrate to new format
-            import pickle as _pickle
-
-            try:
-                old_data = _pickle.loads(decoded)
-            except Exception:
-                raise SessionTamperedError("Unable to decode legacy session data")
-
-            # Re-encode with new format
-            json_data = json.dumps(old_data).encode("utf-8")
-            signed = self._sign(json_data)
-            # Store the migrated data
-            if isinstance(session_data, str):
-                session_data = session_data.encode()
-            # Write back in new format (strip and re-encode)
-            new_encoded = encodebytes(signed)
-            # We can't easily write back here since we're in __getitem__, but the
-            # next __setitem__ will use the new format
-            return old_data
+        # Recognized unsigned legacy formats must never be deserialized.
+        if decoded[0:1] in (b"\x80", b"\x8a", b"\x90"):
+            raise SessionLegacyRejected("Unsigned legacy session data is not supported")
 
         verified = self._verify(decoded)
         return json.loads(verified)

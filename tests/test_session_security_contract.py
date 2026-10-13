@@ -277,18 +277,29 @@ def test_owned_persistent_stores_legacy_read_does_not_rewrite(backend, tmp_path,
             legacy = base64.encodebytes(pickle.dumps({'legacy': 'owned'}, protocol=2))
             write_raw(legacy)
             before = read_raw()
-            assert store['owned'] == {'legacy': 'owned'}
+            if backend == 'db':
+                db.query('CREATE TABLE legacy_audit (operation TEXT, data_changed INTEGER, atime_changed INTEGER)')
+                db.query("CREATE TRIGGER legacy_update AFTER UPDATE ON sessions BEGIN "
+                         "INSERT INTO legacy_audit VALUES ('UPDATE', OLD.data != NEW.data, OLD.atime != NEW.atime); END")
+                db.query("CREATE TRIGGER legacy_delete AFTER DELETE ON sessions BEGIN "
+                         "INSERT INTO legacy_audit VALUES ('DELETE', 1, 0); END")
+            raises(session.SessionLegacyRejected, lambda: store['owned'])
             assert read_raw() == before  # DB atime can change, payload cannot.
             store.secret_key = 'another-test-key'
-            assert store['owned'] == {'legacy': 'owned'}
+            raises(session.SessionLegacyRejected, lambda: store['owned'])
             assert read_raw() == before
+            if backend == 'db':
+                changes = list(db.select('legacy_audit'))
+                assert len(changes) == 2
+                assert all(row.operation == 'UPDATE' and not row.data_changed
+                           and row.atime_changed for row in changes)
             store['owned'] = {'legacy': 'owned'}
             assert read_raw() != before
             assert store['owned'] == {'legacy': 'owned'}
             store.secret_key = 'new-test-key'
             raises(session.SessionTamperedError, lambda: store['owned'])
         assert not root.exists()
-        print(json.dumps({'backend': backend, 'unsigned_legacy_survives_rotation': True,
+        print(json.dumps({'backend': backend, 'unsigned_legacy_rejected_after_rotation': True,
                           'read_does_not_rewrite_payload': True, 'later_write_signed': True}))
     ''', tmp_path, record_property)
 

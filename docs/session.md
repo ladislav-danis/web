@@ -156,14 +156,34 @@ objects raise `TypeError`, and circular structures fail. The default Python JSON
 encoder/decoder also accepts non-finite floats (NaN/Infinity); do not infer strict
 finite-JSON validation or type-preserving round trips for every input.
 
-**Legacy trust boundary:** After base64 decoding, a first byte `0x80`, `0x8a` or
-`0x90` selects a compatibility branch that calls `pickle.loads` **before any
-signature verification**. It can accept unsigned legacy data regardless of key
-rotation. Never read an untrusted or attacker-writable session store: unpickling
-can execute code. Only locally generated benign dictionaries are used in tests;
-no deployed legacy records have been inspected or assumed to exist. A legacy read
-computes a signed representation but **does not persist a rewritten payload**;
-only a later `__setitem__` writes the modern format (DB reads can update `atime`).
+**Legacy trust boundary:** Runtime decoding is fail-closed: after base64 decoding,
+a first byte `0x80`, `0x8a` or `0x90` raises
+`web.session.SessionLegacyRejected`, a `SessionTamperedError` subclass, **without
+unpickling**. This includes malformed data with one of those markers. Other
+unsigned data follows normal signature verification and is rejected there; there
+is no unsigned fallback, automatic migration or switch to re-enable unpickling.
+Modern signed JSON keeps its existing wire format and parsing behavior.
+
+On this specific legacy exception during store retrieval, `Session._load` discards
+request-local fields and starts a new session with a new ID and the configured
+initializer, then sets the current IP. Configure an unauthenticated/guest initializer
+and keep application authentication/authorization gates in place: no old identity,
+permissions, CSRF token or other legacy fields are imported. This recovery applies
+with either `ignore_expiry` value when the legacy record exists; it does not use
+`expired()` or fix the separate missing-record limitation. Normal response saving
+sets the replacement cookie and writes a **new** signed record. The old payload is
+not rewritten or deleted by rejection, and retrying its cookie cannot authenticate
+from it. `DBStore.__getitem__` still updates `atime` **before** decoding, so even a
+rejected read can perform an atime-only UPDATE. Ordinary periodic expiry cleanup
+is a separate lifecycle operation, not migration or rejection cleanup.
+
+Direct `Store.decode` and persistent-store reads expose `SessionLegacyRejected`;
+only the Session load boundary performs the narrow recovery. Modern bad-HMAC,
+malformed-base64/JSON and I/O/general store errors retain their existing failure
+behavior (including HTTP 500 where applicable), not a blanket guest fallback.
+Only locally generated benign dictionaries are used in regression tests; no
+production legacy records have been inspected or assumed to exist. Protect store
+permissions and backups regardless of this change.
 
 MemoryStore keeps Python values in a dict; ShelfStore uses `shelve` and its own
 pickle-based persistence. Neither normally calls `Store.encode/decode` for stored
@@ -793,14 +813,46 @@ workflow. Coordinate every writer/worker to use the new persistent secret and
 recreate/restart Sessions to take the new configuration. Mixed-key writers cannot
 reliably read one another's signed payloads.
 
-Do **not** promise that key rotation logs out every session: unsigned legacy
-pickle can remain readable, and MemoryStore/ShelfStore do not verify signed JSON
-on their normal data path. If all sessions must be invalidated, plan explicit
-invalidation of the relevant backing stores, including legacy entries and
-in-memory/shelf state, while coordinating all writers. This is an operator policy,
-not an instruction to delete a production store or an automatic migration.
-A read alone does not rewrite legacy payloads. Protect both secrets and store
-integrity; signing is not encryption and the legacy decoder requires trusted data.
+Do **not** promise that key rotation logs out every session: MemoryStore/ShelfStore
+do not verify signed JSON on their normal data path. Unsigned legacy records on
+the Store decoder path are rejected regardless of the configured key; changing a
+key is neither migration nor a universal logout workflow. If all sessions must be
+invalidated, separately plan explicit invalidation of the relevant backing stores,
+including in-memory/shelf state, while coordinating every writer. This is an
+operator policy, not authorization to delete a production store.
+
+### Coordinated rollout of legacy rejection
+
+This change supplies no migration tool and performs no offline migration,
+production-store inspection, key rotation or deployment. Users whose stored
+sessions are rejected will need to sign in again after an authorized rollout.
+
+1. Identify and stop/drain **all** writers/workers sharing the store, including
+   background jobs and older application versions. Do not mix legacy-reading
+   workers with hardened workers; old code could still accept unsigned identities.
+2. Take a consistent backup while writers are stopped. Restrict ownership and
+   permissions on live stores, backup copies and secrets; never open an untrusted
+   shelf or unpickle backup content. Record the deployed revision and restore plan.
+3. Install the same hardened version on every worker and configure the same
+   strong, persistent application key before constructing Sessions. Keep the
+   current key unless a separate coordinated rotation is explicitly authorized;
+   rotating it also rejects previously valid signed sessions. Do not restore an
+   old unsafe decoder as a runtime compatibility switch.
+4. Before reopening traffic, verify the exact deployed revisions/configuration
+   on all workers and run a disposable-store smoke: fresh session and ordinary
+   signed session succeed; a locally generated benign legacy fixture fails at
+   the direct API and yields a new guest ID over HTTP, with login gates still
+   enforced. Check replacement-cookie retries and protected-route redirects.
+   Compare the fixture's raw old payload before/after separately from DB atime
+   updates and new guest inserts. Do not use a production record as a test payload.
+5. Resume coordinated workers only after those checks; monitor session errors
+   without logging raw session data or keys. Investigate modern signature/parse
+   failures rather than swallowing them as migration. Any future offline migration
+   would require its own trusted-data policy, explicit approval, backup and
+   independent verification; none is delivered or performed here.
+
+Protect both secrets and store integrity: signing authenticates data, it does not
+encrypt it. The separate ShelfStore pickle trust boundary is unchanged.
 
 ## API Reference
 
