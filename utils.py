@@ -1185,31 +1185,30 @@ class Profile:
         import tempfile
 
         f, filename = tempfile.mkstemp()
-        os.close(f)
-
-        prof = cProfile.Profile()
-
-        stime = time.time()
-        result = prof.runcall(self.func, *args)
-        stime = time.time() - stime
-
-        out = StringIO()
-        stats = pstats.Stats(prof, stream=out)
-        stats.strip_dirs()
-        stats.sort_stats("time", "calls")
-        stats.print_stats(40)
-        stats.print_callers()
-
-        x = "\n\ntook " + str(stime) + " seconds\n"
-        x += out.getvalue()
-
-        # remove the tempfile
         try:
-            os.remove(filename)
-        except OSError:
-            pass
+            os.close(f)
+            prof = cProfile.Profile()
 
-        return result, x
+            stime = time.time()
+            result = prof.runcall(self.func, *args)
+            stime = time.time() - stime
+
+            out = StringIO()
+            stats = pstats.Stats(prof, stream=out)
+            stats.strip_dirs()
+            stats.sort_stats("time", "calls")
+            stats.print_stats(40)
+            stats.print_callers()
+
+            x = "\n\ntook " + str(stime) + " seconds\n"
+            x += out.getvalue()
+            return result, x
+        finally:
+            # remove the tempfile
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
 
 
 profile = Profile

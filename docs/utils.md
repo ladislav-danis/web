@@ -554,11 +554,15 @@ running `func`. Calling that wrapper runs the function with real `cProfile`.
 success. Keyword arguments are not forwarded by this wrapper. Report timings
 are measurements, not stable example outputs.
 
-The current implementation creates a temporary file and removes it on success,
-but can leak it when profiling raises (known separately as web#27). This example
-uses an owned temporary directory with cleanup even on failure; it does not
-repair that runtime limitation. Changing `tempfile.tempdir` is process-global:
-run this recipe in a standalone process, not a concurrent request handler.
+The wrapper attempts to remove its temporary file in `finally`, including when
+closing the initial descriptor, calling `func`, or constructing the report
+raises. As before, an `OSError` from removal is ignored: the result or original
+exception is preserved, but a failed removal can leave the file behind. Other
+cleanup exceptions propagate and take precedence, retaining any active exception
+in `__context__`. A close error is not retried; this does not guarantee descriptor
+release for every OS-level close failure. Only the wrapper's own filename is
+removed. Changing `tempfile.tempdir` is process-global: run this recipe in a
+standalone process, not a concurrent request handler.
 
 **Example:**
 ```python
