@@ -233,7 +233,7 @@ def test_url_real_root_mount_host_and_query(tmp_path, record_property):
     ''', tmp_path, record_property)
 
 
-def test_profiler_materializes_after_profile_and_retains_close_limitation(tmp_path, record_property):
+def test_profiler_materializes_after_profile_and_closes_original(tmp_path, record_property):
     probe('''
         events = []
         class Body:
@@ -254,12 +254,11 @@ def test_profiler_materializes_after_profile_and_retains_close_limitation(tmp_pa
         (status, headers), chunks = request_wsgi(web.profiler(tiny_wsgi))
         assert status == '200 OK'
         assert chunks[0] == b'<p>body</p>'
-        assert events == ['call', 'iteration', 'iteration']
+        assert events == ['call', 'iteration', 'iteration', 'close']
         # Actual cProfile output excludes work deferred to body iteration.
         assert b'tiny_wsgi' in chunks[-1] and b'__next__' not in chunks[-1]
-        # The input iterable close method is not forwarded by list materialization.
-        body.close()  # Our test owns its cleanup.
-        assert events[-1] == 'close'
+        # Materialization closes the original once, before the list is consumed.
+        assert events.count('close') == 1
     ''', tmp_path, record_property)
 
 

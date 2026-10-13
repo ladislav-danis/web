@@ -233,12 +233,23 @@ responses with compatible UTF-8 text, no `Content-Length`, compression,
 body-dependent validators/digests, or other headers invalidated by appending
 bytes. The helper preserves headers unchanged and does not inspect method,
 status or media type. Do not wrap HEAD, 1xx, 204 or 304 responses, redirects,
-JSON, binary downloads, or unbounded streams. It neither forwards an input
-iterable's `close()` nor returns that iterable; do not use it for bodies whose
-resource cleanup depends on explicit close. Successful full iteration of the
-simple web.py response below runs the framework cleanup, but that is not a
-general close guarantee. Keep profiler output away from production clients:
-it exposes internal function/file names and adds overhead.
+JSON, binary downloads, or unbounded streams. Keep profiler output away from
+production clients: it exposes internal function/file names and adds overhead.
+
+After acquiring the original WSGI iterable, the helper materializes it in a
+`try/finally` and calls its callable `close()` exactly once, if present. This
+happens on successful exhaustion or iteration failure (including `BaseException`),
+before constructing the HTML report or returning the list. It closes the
+original iterable, not a distinct iterator returned by `iter()`. No callable
+`close()` is required. Cleanup is not deferred until a consumer exhausts or
+closes the returned list; the list itself has no `close()` method.
+
+Iteration failures propagate after cleanup. A `close()` failure propagates
+instead of returning a response; if iteration also failed, normal Python
+`finally` precedence applies: the close exception wins and the iteration
+exception remains its `__context__`. Failures in the application/profiling call
+before the iterable is acquired are outside this cleanup boundary. Iteration
+and close are still outside the profiled callable invocation.
 
 The example exercises only the supported development GET/200 HTML case, using
 an in-process WSGI validator, not a server. Installing the wrapper over an

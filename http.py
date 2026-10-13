@@ -153,7 +153,8 @@ def profiler(app):
     """Append a UTF-8 profiling report to a development HTML WSGI response.
 
     Profiles the callable invocation, not deferred iteration; materializes the
-    body and does not forward its close(). Headers/method/status are unchanged.
+    body and eagerly calls its callable close(), even on iteration failure.
+    Headers/method/status are unchanged.
     Callers must restrict use to body-bearing HTML without Content-Length or
     other body-dependent headers; see docs/http.md for the supported scope.
     """
@@ -161,7 +162,13 @@ def profiler(app):
 
     def profile_internal(e, o):
         out, result = profile(app)(e, o)
-        return list(out) + [("<pre>" + net.websafe(result) + "</pre>").encode("utf-8")]
+        try:
+            body = list(out)
+        finally:
+            close = getattr(out, "close", None)
+            if callable(close):
+                close()
+        return body + [("<pre>" + net.websafe(result) + "</pre>").encode("utf-8")]
 
     return profile_internal
 
