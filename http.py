@@ -150,24 +150,80 @@ def url(path=None, doseq=False, **kw):
 
 
 def profiler(app):
-    """Append a UTF-8 profiling report to a development HTML WSGI response.
+    """Append a UTF-8 report only to eligible development GET/200 HTML.
 
     Profiles the callable invocation, not deferred iteration; materializes the
     body and eagerly calls its callable close(), even on iteration failure.
-    Headers/method/status are unchanged.
-    Callers must restrict use to body-bearing HTML without Content-Length or
-    other body-dependent headers; see docs/http.md for the supported scope.
+    Other responses bypass report insertion with status/headers/chunks intact.
+    This is not streaming middleware or a repair of invalid underlying HTTP;
+    see docs/http.md for the conservative policy and remaining caller constraints.
     """
+    import re
+
     from .utils import profile
 
+    # Deliberately a narrow allowlist, not a general MIME parser.
+    html_type = re.compile(
+        r'[ \t]*text/html[ \t]*(?:;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8")[ \t]*)?',
+        re.IGNORECASE | re.ASCII,
+    )
+
+    token = r"[!#$%&'*+.^_`|~0-9A-Za-z-]+"
+    protected = {
+        "content-length", "content-encoding", "content-range", "etag",
+        "last-modified", "content-md5", "digest", "content-digest",
+        "repr-digest", "content-disposition",
+    }
+
+    def eligible(e, status, headers):
+        if (e.get("REQUEST_METHOD") != "GET" or status != "200 OK"
+                or "HTTP_RANGE" in e or "HTTP_IF_RANGE" in e):
+            return False
+        fields = {}
+        for name, value in headers:
+            if (not isinstance(name, str) or not isinstance(value, str)
+                    or not re.fullmatch(token, name)
+                    or any(ord(c) < 32 and c != "\t" or ord(c) == 127 for c in value)):
+                return False
+            name = name.lower()
+            if name in fields or name in protected:
+                return False
+            fields[name] = value
+        for mapping, key in ((fields, "cache-control"), (e, "HTTP_CACHE_CONTROL")):
+            if key in mapping:
+                seen = set()
+                for directive in mapping[key].split(","):
+                    directive = directive.strip(" \t")
+                    name = directive.split("=", 1)[0].strip(" \t").lower()
+                    if (not re.fullmatch(token + r"(?:[ \t]*=[ \t]*" + token + r")?", directive)
+                            or name == "no-transform" or name in seen):
+                        return False
+                    seen.add(name)
+        return html_type.fullmatch(fields.get("content-type", "")) is not None
+
     def profile_internal(e, o):
-        out, result = profile(app)(e, o)
+        append_report = False
+
+        def start_response(*args, **kwargs):
+            nonlocal append_report
+            append_report = False
+            status = args[0] if args else kwargs["status"]
+            headers = args[1] if len(args) > 1 else kwargs["headers"]
+            # The server owns the offered list and may consume or mutate it.
+            offered_eligible = eligible(e, status, headers)
+            write = o(*args, **kwargs)
+            append_report = offered_eligible
+            return write
+
+        out, result = profile(app)(e, start_response)
         try:
             body = list(out)
         finally:
             close = getattr(out, "close", None)
             if callable(close):
                 close()
+        if e.get("REQUEST_METHOD") == "HEAD" or not append_report:
+            return body
         return body + [("<pre>" + net.websafe(result) + "</pre>").encode("utf-8")]
 
     return profile_internal

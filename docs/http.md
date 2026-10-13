@@ -228,13 +228,45 @@ Deferred generator work may therefore be absent from the timing/report (the
 framework can consume a first chunk during invocation). This is not a streaming
 profiler, end-to-end request timer, or production middleware.
 
-**Caller constraints, not automatic checks:** use only body-bearing HTML
-responses with compatible UTF-8 text, no `Content-Length`, compression,
-body-dependent validators/digests, or other headers invalidated by appending
-bytes. The helper preserves headers unchanged and does not inspect method,
-status or media type. Do not wrap HEAD, 1xx, 204 or 304 responses, redirects,
-JSON, binary downloads, or unbounded streams. Keep profiler output away from
+**Conservative response policy:** a report is appended only for `GET` and an
+accepted `200 OK` response with exactly one explicit `Content-Type: text/html`.
+Media type and charset matching is case-insensitive, with space/tab whitespace
+allowed around the value and parameter separators. The only optional parameter
+is a single `charset=utf-8` (also accepted as `charset="utf-8"`). Missing media
+type, other media/charsets, duplicate or unknown parameters, malformed values,
+and ambiguous headers omit the report. HEAD, 1xx, 204, 205, 304 and every other
+method/status therefore receive no added report.
+
+Any `Content-Length` or `Content-Encoding` header, even empty or `identity`,
+bypasses insertion. So do `Content-Range`, `ETag`, `Last-Modified`, `Content-MD5`,
+`Digest`, `Content-Digest`, `Repr-Digest`, any `Content-Disposition` (including
+inline), and requests containing `Range` or `If-Range`. Request and response
+`Cache-Control: no-transform` are respected. Cache-Control accepts only a
+comma-separated list of distinct token directives with optional token values;
+quoted, malformed or duplicate directives conservatively omit the report.
+Duplicate response header names, invalid names and control characters other
+than horizontal tab in values also omit it. None of these cases rewrites
+headers or recalculates a length.
+
+**Remaining caller constraints:** this limited policy cannot identify arbitrary
+custom body-dependent headers/signatures. Callers must still supply a valid
+WSGI response, UTF-8-compatible HTML bytes (also when charset is omitted), no
+other metadata invalidated by appending, and small bounded bodies. Bypass
+preserves original status, headers and body chunks; it does not repair a bad
+underlying body/HTTP response and still eagerly materializes the iterable.
+It does not make unbounded streams safe. Keep profiler output away from
 production clients: it exposes internal function/file names and adds overhead.
+
+The response callback delegates the application's original arguments unchanged,
+including optional `exc_info`, and returns the exact server write callable.
+Report eligibility is captured from the offered metadata **before** delegation,
+when the server may consume or mutate the original header list. That immutable
+decision takes effect only after successful delegation, including a replacement
+response with `exc_info` and lazy callbacks during iteration. A
+failed callback clears the previous eligibility and its exception propagates;
+there is no report without a successful response callback. Calls to `write()`
+remain immediate; returned iterable chunks and any report follow them under the
+existing eager behavior, not a new streaming implementation.
 
 After acquiring the original WSGI iterable, the helper materializes it in a
 `try/finally` and calls its callable `close()` exactly once, if present. This
@@ -251,9 +283,9 @@ exception remains its `__context__`. Failures in the application/profiling call
 before the iterable is acquired are outside this cleanup boundary. Iteration
 and close are still outside the profiled callable invocation.
 
-The example exercises only the supported development GET/200 HTML case, using
-an in-process WSGI validator, not a server. Installing the wrapper over an
-unrestricted application does **not** enforce the constraints above.
+The example exercises the supported development GET/200 HTML case, using an
+in-process WSGI validator, not a server. Automatic report omission does not
+remove the remaining caller constraints above.
 
 ```python
 import io

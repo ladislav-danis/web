@@ -262,7 +262,7 @@ def test_profiler_materializes_after_profile_and_closes_original(tmp_path, recor
     ''', tmp_path, record_property)
 
 
-def test_profiler_preserves_length_and_no_body_limitations(tmp_path, record_property):
+def test_profiler_bypasses_length_and_no_body_responses(tmp_path, record_property):
     probe('''
         for method, status in [('GET', '200 OK'), ('HEAD', '200 OK'),
                                ('GET', '204 No Content'), ('GET', '304 Not Modified')]:
@@ -278,9 +278,9 @@ def test_profiler_preserves_length_and_no_body_limitations(tmp_path, record_prop
             captured = []
             chunks = web.profiler(empty_wsgi)(env, lambda s, h: captured.append((s, h)))
             assert captured == [(status, headers)]  # No header adjustment.
-            assert len(chunks) == 1 and chunks[0].startswith(b'<pre>')
-            assert len(b''.join(chunks)) > int(dict(headers)['Content-Length'])
-            # This is evidence of unsupported HTTP cases, not valid WSGI claims.
+            assert captured[0][1] is headers
+            assert chunks == []
+            assert len(b''.join(chunks)) == int(dict(headers)['Content-Length'])
     ''', tmp_path, record_property)
 
 
