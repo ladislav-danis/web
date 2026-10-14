@@ -238,7 +238,9 @@ def test_wb12_documented_loop_helpers(tmp_path, record_property):
 def test_wb13_pinned_unicode_bom_limitation(tmp_path, record_property):
     probe(r'''
         from tempfile import TemporaryDirectory
-        assert Template.normalize_text('\ufeffhello') == '\ufeffhello\n'
+        assert Template.normalize_text('\ufeffhello') == 'hello\n'
+        assert str(Template('\ufeffhello')()) == 'hello\n'
+        assert str(Template('\ufeff$def with(name)\n$name')('Ada')) == 'Ada\n'
         assert Template.normalize_text('\xef\xbb\xbfhello') == 'hello\n'
         assert Template.normalize_text('a\r\nb\rc\tX') == 'a\nb\nc       X\n'
         assert Template.normalize_text('a\\$b') == 'a$$b\n'
@@ -248,9 +250,9 @@ def test_wb13_pinned_unicode_bom_limitation(tmp_path, record_property):
             (root / 'legacy.txt').write_text('\xef\xbb\xbfhello', encoding='utf-8')
             (root / 'args.txt').write_bytes(b'\xef\xbb\xbf$def with(name)\n$name')
             render = Render(directory, cache=False)
-            assert str(render.bom()) == '\ufeffhello\n'
+            assert str(render.bom()) == 'hello\n'
             assert str(render.legacy()) == 'hello\n'
-            raises(SyntaxError, lambda: render.args)
+            assert str(render.args('Ada')) == 'Ada\n'
         assert not root.exists()
     ''', tmp_path, record_property)
 

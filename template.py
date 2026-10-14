@@ -971,7 +971,9 @@ class Template(BaseTemplate):
 
         # ignore BOM chars at the beginning of template
         BOM = "\xef\xbb\xbf"
-        if isinstance(text, str) and text.startswith(BOM):
+        if isinstance(text, str) and text.startswith("\ufeff"):
+            text = text[1:]
+        elif isinstance(text, str) and text.startswith(BOM):
             text = text[len(BOM) :]
 
         # support fort \$ for backward-compatibility

@@ -459,37 +459,40 @@ Template(
 ##### Methods
 
 - `__call__(*a, **kw)` - Executes the template with arguments
-- `normalize_text(text)` - Normalizes CRLF/CR to LF, expands tabs, appends a missing final newline, converts legacy `\$` to `$$`, and strips only the leading legacy string `"\xef\xbb\xbf"` (not Unicode U+FEFF)
+- `normalize_text(text)` - Normalizes CRLF/CR to LF, expands tabs, appends a missing final newline, converts legacy `\$` to `$$`, and removes one leading Unicode U+FEFF or legacy string `"\xef\xbb\xbf"`
 - `generate_code(text, filename, parser=None)` - Generates Python code from template
 - `compile_template(template_string, filename)` - Compiles template to executable code
 
 ##### Text normalization and UTF-8 BOM
 
-**Pinned limitation, not fixed here:** a real Unicode BOM (`U+FEFF`) remains in
-the text. `Render` reads files with `encoding="utf-8"`, so a UTF-8 BOM becomes
-U+FEFF, can appear in rendered output, and prevents an initial `$def with` from
-being recognized (a BOM-prefixed argument declaration raises `SyntaxError`).
-The removed three-character legacy string is a mojibake sequence, not U+FEFF.
-Prefer UTF-8 templates saved **without** a BOM. When explicitly loading a file
-in application Python, `utf-8-sig` is a bounded workaround, not a Render fix:
+`Template` removes one leading Unicode BOM (`U+FEFF`) before parsing. `Render`
+continues to decode files with `encoding="utf-8"`; its decoded BOM is handled by
+that same normalization, including before an initial `$def with` declaration.
+For compatibility, normalization also recognizes the three-character legacy
+mojibake prefix `"\xef\xbb\xbf"` (U+00EF U+00BB U+00BF), which is not U+FEFF.
+Only one matching leading prefix is removed per normalization call. Interior
+BOMs, BOMs after whitespace, and remaining duplicate or mixed prefixes are not
+stripped. CRLF/CR conversion, tab expansion (before BOM removal), the final
+newline and legacy dollar escaping retain their existing behavior.
 
 ```python
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from web.template import Template, Render
 
-assert Template.normalize_text("\ufeffHello") == "\ufeffHello\n"
+assert Template.normalize_text("\ufeffHello") == "Hello\n"
 assert Template.normalize_text("\xef\xbb\xbfHello") == "Hello\n"
 with TemporaryDirectory() as directory:
     root = Path(directory)
     path = root / "hello.txt"
     path.write_bytes(b"\xef\xbb\xbfHello")
-    assert str(Render(directory, cache=False).hello()) == "\ufeffHello\n"
-    clean = Template(path.read_text(encoding="utf-8-sig"))
+    assert str(Render(directory, cache=False).hello()) == "Hello\n"
+    clean = Template(path.read_text(encoding="utf-8"))
     assert str(clean()) == "Hello\n"
     path.write_bytes(b"\xef\xbb\xbf$def with (name)\nHello $name!")
-    clean = Template(path.read_text(encoding="utf-8-sig"))
+    clean = Template(path.read_text(encoding="utf-8"))
     assert str(clean("World")) == "Hello World!\n"
+    assert str(Render(directory, cache=False).hello("World")) == "Hello World!\n"
 assert not root.exists()
 ```
 
@@ -710,7 +713,7 @@ The standalone Python recipes below and in [Security Features](#security-feature
 are executed from their Markdown bytes. Syntax fragments use the explicit sample
 data listed above; constructor signatures and class-name reference tables are not
 standalone programs. Runtime characterizations of restricted builtins, unsized
-loops, BOM handling and historical doctest failures are not runtime repairs.
+loops and historical doctest failures are not runtime repairs.
 Never infer HTML escaping from HTML-shaped text; select the appropriate filter.
 
 ### Basic Template
