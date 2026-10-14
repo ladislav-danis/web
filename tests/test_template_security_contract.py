@@ -270,11 +270,10 @@ def test_pinned_assignment_limitation_mutates_owned_object(statement, expected, 
         from types import SimpleNamespace
         box = SimpleNamespace(x=1)
         statement, expected = ''' + repr((statement, expected)) + r'''
-        template = Template('$def with(a)\n$code:\n    ' + statement + '\n$a.x')
-        assert box.x == 1  # construction has not executed the template
-        assert str(template(box)) == str(expected) + '\n'
-        assert box.x == expected
-        print(json.dumps({'unchanged_runtime_limitation': statement, 'after': box.x}))
+        error = raises(SecurityError, lambda: Template('$def with(a)\n$code:\n    ' + statement + '\n$a.x'))
+        assert "attribute 'x'" in str(error)
+        assert box.x == 1  # rejected during construction; never render
+        print(json.dumps({'rejected_assignment': statement, 'obsolete_expected': expected, 'after': box.x}))
     ''', tmp_path, record_property)
 
 

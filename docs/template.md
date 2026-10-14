@@ -899,19 +899,20 @@ assert "Column 2 (parent: 2)" in str(result)
 ### AST Validation
 
 Template construction compiles generated Python and applies `SafeVisitor`.
-Ordinary visited expressions reject restricted names/attributes and disallowed
-node types (for example, an `import` statement). A direct attribute target such
-as `a.x = 3` is rejected with `SecurityError` at construction time.
+Visited expressions reject restricted names/attributes and disallowed node types
+(for example, an `import` statement). Attribute targets of ordinary and augmented
+assignments, including elements nested in tuple/list unpacking targets, are
+rejected with `SecurityError` at construction time. Augmented assignments also
+validate their target subexpressions and right-hand side. This repairs the
+assignment-target and traversal defect tracked in
+[web#30](https://git.home.arpa/mosaic-ai/web/issues/30).
 
-**This revision does not enforce a complete ban on attribute writes.**
-`a.x += 1` and `(a.x, y) = (2, 3)` compile and mutate the supplied object when
-rendered; nested tuple targets also pass. `visit_AugAssign` checks the statement
-node instead of its target and does not visit its children; assignment-target
-checking does not recurse into tuples. This is an unresolved source security
-defect, not supported safe mutation or a runtime fix in this documentation.
-Source hardening is tracked separately in
-[web#30](https://git.home.arpa/mosaic-ai/web/issues/30); rejection of these writes
-and preservation of the existing restrictions are not implemented here.
+Local single/chained assignments, local augmented assignments and local
+non-starred tuple/list unpacking remain supported. Starred unpacking remains
+disallowed by the existing AST allowlist. Ordinary item assignment is unchanged:
+public attribute reads used to reach an item are not attribute-write targets,
+while restricted names/attributes in those expressions are still rejected.
+This is not a complete ban on mutation or a change to other statement targets.
 
 This harmless example uses only newly created objects, not application state:
 
@@ -928,13 +929,17 @@ else:
     raise AssertionError("Direct attribute assignment must be rejected")
 assert box.x == 1
 
-# Characterizations of an unresolved defect, not recommended template code.
-for statement, expected in [("a.x += 1", 2), ("(a.x, y) = (2, 3)", 2)]:
+# Reject at construction without rendering or mutating any owned object.
+for statement in ["a.x += 1", "(a.x, y) = (2, 3)",
+                  "((a.x, y), z) = ((4, 3), 5)"]:
     owned = SimpleNamespace(x=1)
-    template = Template("$def with(a)\n$code:\n    " + statement + "\n$a.x")
+    try:
+        Template("$def with(a)\n$code:\n    " + statement + "\n$a.x")
+    except SecurityError:
+        pass
+    else:
+        raise AssertionError("Attribute assignment must be rejected")
     assert owned.x == 1
-    assert str(template(owned)) == str(expected) + "\n"
-    assert owned.x == expected
 ```
 
 Treat templates as **trusted application code**. Objects, globals and callables

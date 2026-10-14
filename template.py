@@ -1382,7 +1382,8 @@ class SafeVisitor(ast.NodeVisitor):
         self.check_assign_targets(node)
 
     def visit_AugAssign(self, node):
-        self.check_assign_target(node)
+        self.check_assign_target(node.target)
+        super().generic_visit(node)
 
     def check_assign_targets(self, node):
         for target in node.targets:
@@ -1394,6 +1395,9 @@ class SafeVisitor(ast.NodeVisitor):
         if targetname == "Attribute":
             attrname = self.get_node_attr(targetnode)
             self.fail_attribute(targetnode, attrname)
+        elif targetname in ("Tuple", "List"):
+            for element in targetnode.elts:
+                self.check_assign_target(element)
 
     # failure modes
     def fail_node(self, node, nodename):
