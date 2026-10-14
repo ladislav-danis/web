@@ -291,7 +291,7 @@ def test_all_fences_have_an_execution_mode():
 
 @pytest.mark.parametrize('name,cases,examples', [('web.db', 23, 83), ('web.template', 18, 124), ('web.form', 22, 45)])
 def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples, tmp_path, record_property):
-    # Historical ID retained: db/template pass; form remains a failing diagnostic.
+    # Historical ID retained: db/template/form now have nonempty passing doctests.
     source = '''
         import doctest
         import importlib
@@ -310,9 +310,9 @@ def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples
             assert result.testsRun == cases and not result.failures and not result.errors
             assert result.wasSuccessful()
         else:
-            assert result.testsRun == cases and result.failures and not result.errors
-            assert not result.wasSuccessful()
-            assert len(result.failures) == {'web.db': 1, 'web.form': 21}[name]
+            assert name == 'web.form'
+            assert result.testsRun == cases and not result.failures and not result.errors
+            assert result.wasSuccessful()
         print(json.dumps({'module': name, 'executed_cases': result.testsRun,
                           'failed_case_ids': [case.id() for case, _ in result.failures],
                           'compiled_examples': examples, 'nested_doctests_passed': result.wasSuccessful()}))
@@ -325,7 +325,7 @@ def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples
     record_property('probe_stdout', result.stdout)
     record_property('probe_stderr', result.stderr)
     record_property('child_returncode', result.returncode)
-    assert result.returncode == (0 if name in ('web.template', 'web.db') else 1), result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     evidence = json.loads(result.stdout.splitlines()[-1])
     assert evidence['module'] == name and evidence['executed_cases'] == cases
     if name == 'web.template':
@@ -333,5 +333,5 @@ def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples
     elif name == 'web.db':
         assert evidence['failed_case_ids'] == [] and evidence['nested_doctests_passed'] is True
     else:
-        assert evidence['failed_case_ids'] and evidence['nested_doctests_passed'] is False
-        assert len(evidence['failed_case_ids']) == {'web.db': 1, 'web.form': 21}[name]
+        assert name == 'web.form'
+        assert evidence['failed_case_ids'] == [] and evidence['nested_doctests_passed'] is True

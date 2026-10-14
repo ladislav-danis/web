@@ -797,3 +797,24 @@ else:
 
 print(f.render())
 ```
+
+## Source doctests and module CLI
+
+The Python 3 source docstrings in `web.form` execute 45 examples across 22
+nonempty doctest cases. Their expected string representations no longer carry
+the Python 2 `u` prefix; the rendered HTML bytes, attribute ordering, escaping
+and form validation behavior are unchanged. This source-doctest result does not
+certify every illustrative snippet on this reference page; older displayed
+representations above are retained here.
+
+With this checkout's `web` package importable, `python -m web.form` runs the
+module's doctests and returns exit 0 on success or exit 1 on doctest failure.
+This intentionally replaces the old always-zero status on reported failures.
+An ordinary positional argument such as `Form` is ignored, not a class selector;
+it still runs all 45 examples. The entry point calls `doctest.testmod()`, not
+`web.test.main()`. Importing the package can produce a runpy preimport
+`RuntimeWarning`; it is distinct from doctest failure.
+
+Inspect the real result and nonempty execution count rather than treating exit
+0 alone as coverage. This policy applies to the form module entry point, not
+to custom scripts that discard the result returned by `web.test.runTests`.

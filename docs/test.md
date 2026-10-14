@@ -241,15 +241,24 @@ for module in web.test.load_modules(['web.db', 'web.template', 'web.form']):
           'doctest cases:', docs, 'doctest examples:', examples)
 ```
 
-On the audited Python 3.13 environment, the DB doctests now pass all 83 examples
+On the audited Python 3.13 environment, the DB doctests pass all 83 examples
 in 23 DocTestCases ([web#34](https://git.home.arpa/mosaic-ai/web/issues/34)).
 Template doctests pass all 124 examples in 18 cases after
 [web#32](https://git.home.arpa/mosaic-ai/web/issues/32) and application-side date
 formatting in [web#33](https://git.home.arpa/mosaic-ai/web/issues/33); direct
-restricted-template `strftime` remains unsupported. These results do not make
-all framework docstrings a green quickstart: form still has 21 failing cases
-out of 22 (45 examples inventoried), tracked in
-[web#35](https://git.home.arpa/mosaic-ai/web/issues/35).
-Failing cases and failing examples are different units. The DB module CLI now
-returns 1 for doctest failure and 0 for success, after its parser and safe-eval
-checks; `TestDatabase` is still ignored, not a class selector.
+restricted-template `strftime` remains unsupported. Form doctests now execute
+and pass all 45 examples in 22 cases after correcting Python 2 string-repr
+expectations ([web#35](https://git.home.arpa/mosaic-ai/web/issues/35)); rendered
+HTML and form runtime behavior are unchanged. These three nonempty suites pass;
+this is not a claim about every other framework docstring. Failing cases and
+failing examples remain different units.
+
+The DB module CLI returns 1 for doctest failure and 0 for success, after its
+parser and safe-eval checks; `TestDatabase` is still ignored, not a class
+selector. This supersedes the historical always-zero DB warning under Command
+Line Usage above. The form module CLI likewise returns 0 for passing doctests
+and 1 for doctest failure; it runs all 45 examples without an argument or with
+an ignored positional argument such as `Form`, not a class selection. This
+changes the old always-zero form CLI behavior on failure. It does not change
+`web.test.runTests`: a custom script that ignores its returned unsuccessful
+result can still exit 0. Check actual execution counts and results.
