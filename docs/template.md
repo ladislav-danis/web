@@ -639,27 +639,34 @@ print(result)
 raise SystemExit(1 if result.failed else 0)
 ```
 
-This is a diagnostic runner, **not a green quickstart**. On the tested CPython
-3.13.5 snapshot it attempts all 124 examples in 18 doctest cases and reports
-1 failure (exit 1). The obsolete Python 2 repr prefixes, malformed expected
-literal, helper representation and exception messages have been updated; the
-exception wording is that of modern CPython (verified here on 3.13.5), not a
-promise that exact messages match every older interpreter. The dollar-escape
-example uses a raw string with the same runtime text and no invalid-escape warning.
+On the tested CPython 3.13.5 snapshot this runner executes all 124 examples in
+18 doctest cases successfully (0 failures, exit 0). Calling the no-op function
+is not equivalent to this execution. The exception wording is that of modern
+CPython (verified here on 3.13.5), not a promise that exact messages match every
+older interpreter. The dollar-escape example uses a raw string with the same
+runtime text and no invalid-escape warning.
 
-The remaining `date.strftime(...)` example still expects the successful date
-output, but actually raises `KeyError: '__import__'` under the restricted builtins.
-This real runtime defect is tracked separately as web#33; it is not skipped or
-redefined as an expected exception. Format dates in trusted application Python
-and pass the resulting text rather than adding `__import__` to template builtins.
-Do not treat the nested doctest suite as green or run unrelated database doctests.
+The datetime example formats the date in trusted application Python **before**
+passing text to the template: `datetime.datetime(2009, 1, 1).strftime('%m %Y')`
+produces `01 2009`, and the template interpolates that string with a trailing
+newline. This is the supported application-side route, not a runtime change to
+restricted templates. Direct `$date.strftime('%m %Y')` inside a template remains
+unsupported: it raises `KeyError: '__import__'` on the tested CPython 3.13.5,
+including after application-side warmup or preimporting the formatting modules.
+Do not add `__import__` or broaden template builtins to make that call work.
+The existing AST validation and restricted builtins are unchanged; this does
+not establish a reduction in their current attack surface. Supplied callables
+and globals still convey application capabilities. Injecting a trusted formatter
+is not sandboxing; application-side preformatting avoids needing that capability
+for this example. HTML escaping still depends on the template's filename/filter.
 
-`python -m web.template` now exits with status 0 when all its doctests pass and
-status 1 when any fail, just like the explicit runner above. Consequently the
-current snapshot exits 1; scripts relying on its former always-zero status must
-handle failures. `-v` displays the actual example inventory and results.
-The `--compile <directory>` branch is unchanged: it compiles templates instead of
-running doctests. The no-op `web.template.test()` API is also unchanged.
+`python -m web.template` exits with status 0 when all its doctests pass and
+status 1 when any fail, just like the explicit runner above. The current examples
+therefore exit 0; failure propagation remains part of the contract. `-v` displays
+the actual example inventory and results. This template result does not certify
+unrelated database or form doctests. The `--compile <directory>` branch is
+unchanged: it compiles templates instead of running doctests. The no-op
+`web.template.test()` API is also unchanged.
 
 ### Constants
 

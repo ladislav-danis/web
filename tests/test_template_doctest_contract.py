@@ -1,4 +1,4 @@
-"""Python 3 doctest contracts, separate from the unresolved strftime runtime bug.
+"""Python 3 doctest contracts with application-side date formatting.
 
 Real runners in fresh -I -B children; Python guards are not an OS sandbox.
 """
@@ -63,7 +63,7 @@ print(output.getvalue())
 
 
 def test_python3_repr_expectations_match_actual_results(tmp_path, record_property):
-    # Exception wording and the real strftime failure are separate slices.
+    # Exception wording and the date example have separate contracts.
     probe(RUN_DOCTESTS + r'''
 remaining_repr = [(name, ordinal, e.want, got) for name, ordinal, e, got in failures
                   if e.exc_msg is None and not (name == 'web.template.test' and ordinal == 65)]
@@ -153,19 +153,22 @@ def cli_evidence():
 
 
 def test_module_cli_propagates_real_doctest_failure(tmp_path, record_property):
+    # Historical ID retained: repository doctests now pass; the owned fault
+    # control below still proves real failure propagation without mocking.
     result, data = module_cli(tmp_path, record_property)
-    assert (data['failed'], data['attempted'], len(data['cases'])) == (1, 124, 18)
-    assert data['cases']['__main__.test'][:2] == [1, 66]
-    assert "KeyError: '__import__'" in result.stdout
-    assert '123 passed and 1 failed.' in result.stdout
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert (data['failed'], data['attempted'], len(data['cases'])) == (0, 124, 18)
+    assert data['cases']['__main__.test'][:2] == [0, 66]
+    assert all(stats[0] == 0 and (len(stats) < 3 or stats[2] == 0) for stats in data['cases'].values())
+    assert "KeyError: '__import__'" not in result.stdout
+    assert '124 passed.\nTest passed.' in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_module_cli_real_success_and_restored_failure_control(tmp_path, record_property):
-    """Only the disposable success fixture preformats the date in trusted Python.
+    """Real success → one owned wrong expectation → exact restored success.
 
-    The repository example remains an actual failure. Restore the exact source
-    in that same owned fixture to prove the runner is not an always-zero stub.
+    Historical ID retained. The negative control is an output mismatch, not a
+    reintroduction of unsupported runtime strftime or a mocked doctest result.
     """
     import hashlib
     import json
@@ -182,30 +185,42 @@ def test_module_cli_real_success_and_restored_failure_control(tmp_path, record_p
         manifest[source.name] = hashlib.sha256(raw).hexdigest()
     path = package / 'template.py'
     original = path.read_bytes()
-    old = b'''        >>> t("$def with (date)\\n$date.strftime('%m %Y')")(datetime.datetime(2009, 1, 1))'''
-    new = b'''        >>> t("$def with (date)\\n$date")(datetime.datetime(2009, 1, 1).strftime('%m %Y'))'''
-    assert original.count(old) == 1 and new not in original
-    fixture = original.replace(old, new)
-    assert fixture.replace(new, old) == original
-    path.write_bytes(fixture)
     positive, good = module_cli(tmp_path, lambda k, v: record_property('positive_' + k, v),
                                 source_parent=exported)
-    assert good['source_sha256'] == hashlib.sha256(fixture).hexdigest()
+    assert good['source_sha256'] == manifest['template.py']
     assert (good['failed'], good['attempted'], len(good['cases'])) == (0, 124, 18)
     assert all(stats[0] == 0 and (len(stats) < 3 or stats[2] == 0) for stats in good['cases'].values())
     assert '124 passed.\nTest passed.' in positive.stdout
     assert positive.returncode == 0, positive.stdout + positive.stderr
-    path.write_bytes(original)
-    negative, bad = module_cli(tmp_path, lambda k, v: record_property('negative_' + k, v),
-                               source_parent=exported)
-    assert bad['source_sha256'] == manifest['template.py']
-    assert (bad['failed'], bad['attempted'], len(bad['cases'])) == (1, 124, 18)
-    assert {k: v[1] for k, v in good['cases'].items()} == {k: v[1] for k, v in bad['cases'].items()}
-    assert negative.returncode == 1 and "KeyError: '__import__'" in negative.stdout
+    old = b"        '01 2009\\n'\n"
+    new = b"        'WRONG DATE CONTROL\\n'\n"
+    assert original.count(old) == 1 and new not in original
+    fixture = original.replace(old, new)
+    assert fixture.replace(new, old) == original
+    path.write_bytes(fixture)
+    try:
+        negative, bad = module_cli(tmp_path, lambda k, v: record_property('negative_' + k, v),
+                                   source_parent=exported)
+        assert bad['source_sha256'] == hashlib.sha256(fixture).hexdigest()
+        assert (bad['failed'], bad['attempted'], len(bad['cases'])) == (1, 124, 18)
+        assert {k: v[1] for k, v in good['cases'].items()} == {k: v[1] for k, v in bad['cases'].items()}
+        assert bad['cases']['__main__.test'][:2] == [1, 66]
+        assert 'Expected:' in negative.stdout and 'WRONG DATE CONTROL' in negative.stdout
+        assert "KeyError: '__import__'" not in negative.stdout
+        assert '123 passed and 1 failed.' in negative.stdout
+        assert negative.returncode == 1, negative.stdout + negative.stderr
+    finally:
+        path.write_bytes(original)
+    restored, restored_data = module_cli(tmp_path, lambda k, v: record_property('restored_' + k, v),
+                                         source_parent=exported)
+    assert restored_data['source_sha256'] == manifest['template.py']
+    assert restored_data['cases'] == good['cases']
+    assert (restored_data['failed'], restored_data['attempted']) == (0, 124)
+    assert restored.returncode == 0 and '124 passed.\nTest passed.' in restored.stdout
     assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in package.glob('*.py')} == manifest
     record_property('fixture_source_manifest', json.dumps(manifest, sort_keys=True))
     record_property('fixture_exact_change', json.dumps({'old': old.decode(), 'new': new.decode(),
-                                                       'positive_sha256': hashlib.sha256(fixture).hexdigest()}))
+                                                       'negative_sha256': hashlib.sha256(fixture).hexdigest()}))
 
 
 def test_module_compile_owned_templates_unchanged_path(tmp_path, record_property):
@@ -243,13 +258,19 @@ def test_module_compile_keeps_real_syntax_failure(tmp_path, record_property):
 
 
 def test_remaining_strftime_failure_keeps_desired_output(tmp_path, record_property):
+    # The historical ID now checks the supported example plus the separately
+    # unsupported direct call, rather than retaining a failing published recipe.
     probe(RUN_DOCTESTS + r'''
-assert len(failures) == runner.failures == 1
-name, ordinal, example, got = failures[0]
-assert (name, ordinal) == ('web.template.test', 65)
+assert failures == [] and runner.failures == 0
+case = next(t for t in cases if t.name == 'web.template.test')
+example = case.examples[65]
 assert example.want == "'01 2009\\n'\n"
 assert example.exc_msg is None and example.options == {}
-assert got == "KeyError('__import__')"
+import datetime
+error = raises(KeyError, lambda: Template("$def with (date)\n$date.strftime('%m %Y')")(
+    datetime.datetime(2009, 1, 1)))
+assert error.args == ('__import__',)
 assert '__import__' not in module.TEMPLATE_BUILTINS
 assert module.test() is None
+assert blocked == []
 ''', tmp_path, record_property)

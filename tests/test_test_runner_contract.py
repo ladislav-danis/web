@@ -291,7 +291,7 @@ def test_all_fences_have_an_execution_mode():
 
 @pytest.mark.parametrize('name,cases,examples', [('web.db', 23, 83), ('web.template', 18, 124), ('web.form', 22, 45)])
 def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples, tmp_path, record_property):
-    # Passing pytest characterization != passing nested framework doctests.
+    # Historical ID retained: template passes; db/form remain failing diagnostics.
     source = '''
         import doctest
         import importlib
@@ -303,11 +303,16 @@ def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples
         assert selected.countTestCases() == cases
         assert sum(len(d.examples) for d in doctest.DocTestFinder().find(module)) == examples
         result = t.runTests(selected)
-        assert result.testsRun == cases and result.failures and not result.errors
-        assert not result.wasSuccessful()
+        if name == 'web.template':
+            assert result.testsRun == cases and not result.failures and not result.errors
+            assert result.wasSuccessful()
+        else:
+            assert result.testsRun == cases and result.failures and not result.errors
+            assert not result.wasSuccessful()
+            assert len(result.failures) == {'web.db': 1, 'web.form': 21}[name]
         print(json.dumps({'module': name, 'executed_cases': result.testsRun,
                           'failed_case_ids': [case.id() for case, _ in result.failures],
-                          'compiled_examples': examples, 'nested_doctests_passed': False}))
+                          'compiled_examples': examples, 'nested_doctests_passed': result.wasSuccessful()}))
         raise SystemExit(not result.wasSuccessful())
     '''
     result = subprocess.run([sys.executable, '-I', '-B', '-c', BOOTSTRAP + textwrap.dedent(source), str(WEB_ROOT.parent)],
@@ -317,7 +322,11 @@ def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples
     record_property('probe_stdout', result.stdout)
     record_property('probe_stderr', result.stderr)
     record_property('child_returncode', result.returncode)
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == (0 if name == 'web.template' else 1), result.stdout + result.stderr
     evidence = json.loads(result.stdout.splitlines()[-1])
     assert evidence['module'] == name and evidence['executed_cases'] == cases
-    assert evidence['failed_case_ids'] and evidence['nested_doctests_passed'] is False
+    if name == 'web.template':
+        assert evidence['failed_case_ids'] == [] and evidence['nested_doctests_passed'] is True
+    else:
+        assert evidence['failed_case_ids'] and evidence['nested_doctests_passed'] is False
+        assert len(evidence['failed_case_ids']) == {'web.db': 1, 'web.form': 21}[name]

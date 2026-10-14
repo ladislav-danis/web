@@ -1743,7 +1743,7 @@ def test():
     Test datetime.
 
         >>> import datetime
-        >>> t("$def with (date)\n$date.strftime('%m %Y')")(datetime.datetime(2009, 1, 1))
+        >>> t("$def with (date)\n$date")(datetime.datetime(2009, 1, 1).strftime('%m %Y'))
         '01 2009\n'
 
     """

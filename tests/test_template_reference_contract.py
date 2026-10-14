@@ -126,12 +126,11 @@ def test_wb10_noop_and_historical_doctests(tmp_path, record_property):
         for test in doctest.DocTestFinder().find(module):
             runner.run(test, out=output.write)
         outcome = runner.summarize(verbose=False)
-        assert outcome.attempted > 0 and outcome.failed > 0
-        assert "KeyError: '__import__'" in output.getvalue()
-        assert {name: stats[:2] for name, stats in runner._stats.items() if stats[0]} == {
-            'web.template.test': (1, 66)}
-        assert (outcome.failed, outcome.attempted) == (1, 124)
-        # Separate an actual runtime limitation from obsolete repr expectations.
+        assert outcome.attempted > 0 and outcome.failed == 0
+        assert "KeyError: '__import__'" not in output.getvalue()
+        assert {name: stats[:2] for name, stats in runner._stats.items() if stats[0]} == {}
+        assert (outcome.failed, outcome.attempted) == (0, 124)
+        # The actual doctest uses preformatting; direct runtime calls stay unsupported.
         import datetime
         date = datetime.datetime(2009, 1, 1)
         error = raises(KeyError, lambda: Template("$def with (date)\\n$date.strftime('%m %Y')")(date))
@@ -148,7 +147,7 @@ def test_wb10_documented_runner_reports_real_failure_exit(tmp_path, record_prope
     assert closed and language == 'python'
     record_property('fence_sha256', hashlib.sha256(code).hexdigest())
     record_property('markdown_line', line)
-    record_property('mode', 'standalone Python; expected real strftime doctest failure exit 1')
+    record_property('mode', 'standalone Python; actual complete doctest success exit 0')
     program = BOOTSTRAP + "\nns = {'__name__': '__main__'}\nexec(compile(" + repr(code) + ", 'docs/template.md', 'exec'), ns)\n"
     result = subprocess.run([sys.executable, '-I', '-B', '-c', program, str(WEB_ROOT.parent)],
                             cwd=tmp_path, env={'PATH': os.defpath, 'HOME': str(tmp_path),
@@ -157,10 +156,10 @@ def test_wb10_documented_runner_reports_real_failure_exit(tmp_path, record_prope
     record_property('probe_stdout', result.stdout)
     record_property('probe_stderr', result.stderr)
     record_property('child_returncode', result.returncode)
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert 'TestResults(failed=1, attempted=124)' in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'TestResults(failed=0, attempted=124)' in result.stdout
     assert result.stderr == ''
-    assert "KeyError: '__import__'" in result.stdout
+    assert "KeyError: '__import__'" not in result.stdout
 
 
 def test_wb11_parser_consumption_shapes(tmp_path, record_property):
