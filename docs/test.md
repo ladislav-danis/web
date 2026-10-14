@@ -241,11 +241,15 @@ for module in web.test.load_modules(['web.db', 'web.template', 'web.form']):
           'doctest cases:', docs, 'doctest examples:', examples)
 ```
 
-These framework docstrings are **not a green quickstart** on the audited Python
-3.13 environment: db's direct doctest runner attempted 83 examples with two
-repr-order failures, template attempted 124 with 60 failures, and the old custom
-suite ran 22 form DocTestCases with 21 failing cases. Case failures and example
-failures are different units. Existing expectation/CLI issues are tracked in
-[web#32](https://git.home.arpa/mosaic-ai/web/issues/32), and the restricted-template
-`strftime` limitation separately in [web#33](https://git.home.arpa/mosaic-ai/web/issues/33).
-This reference repair does not change those runtime contracts or expectations.
+On the audited Python 3.13 environment, the DB doctests now pass all 83 examples
+in 23 DocTestCases ([web#34](https://git.home.arpa/mosaic-ai/web/issues/34)).
+Template doctests pass all 124 examples in 18 cases after
+[web#32](https://git.home.arpa/mosaic-ai/web/issues/32) and application-side date
+formatting in [web#33](https://git.home.arpa/mosaic-ai/web/issues/33); direct
+restricted-template `strftime` remains unsupported. These results do not make
+all framework docstrings a green quickstart: form still has 21 failing cases
+out of 22 (45 examples inventoried), tracked in
+[web#35](https://git.home.arpa/mosaic-ai/web/issues/35).
+Failing cases and failing examples are different units. The DB module CLI now
+returns 1 for doctest failure and 0 for success, after its parser and safe-eval
+checks; `TestDatabase` is still ignored, not a class selector.

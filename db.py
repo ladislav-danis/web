@@ -1495,9 +1495,9 @@ def dburl2dict(url):
         >>> dburl2dict('mysql://james:d%40y@serverfarm.example.net/mygreatdb') == {'pw': 'd@y', 'dbn': 'mysql', 'db': 'mygreatdb', 'host': 'serverfarm.example.net', 'user': 'james', 'port': None}
         True
         >>> dburl2dict('sqlite:///mygreatdb.db')
-        {'db': 'mygreatdb.db', 'dbn': 'sqlite'}
+        {'dbn': 'sqlite', 'db': 'mygreatdb.db'}
         >>> dburl2dict('sqlite:////absolute/path/mygreatdb.db')
-        {'db': '/absolute/path/mygreatdb.db', 'dbn': 'sqlite'}
+        {'dbn': 'sqlite', 'db': '/absolute/path/mygreatdb.db'}
     """
     parts = urlparse(unquote(url))
 
@@ -1812,6 +1812,7 @@ def test_safeeval():
 if __name__ == "__main__":
     import doctest
 
-    doctest.testmod()
+    result = doctest.testmod()
     test_parser()
     test_safeeval()
+    raise SystemExit(bool(result.failed))

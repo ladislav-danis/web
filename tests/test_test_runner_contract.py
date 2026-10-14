@@ -291,7 +291,7 @@ def test_all_fences_have_an_execution_mode():
 
 @pytest.mark.parametrize('name,cases,examples', [('web.db', 23, 83), ('web.template', 18, 124), ('web.form', 22, 45)])
 def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples, tmp_path, record_property):
-    # Historical ID retained: template passes; db/form remain failing diagnostics.
+    # Historical ID retained: db/template pass; form remains a failing diagnostic.
     source = '''
         import doctest
         import importlib
@@ -304,6 +304,9 @@ def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples
         assert sum(len(d.examples) for d in doctest.DocTestFinder().find(module)) == examples
         result = t.runTests(selected)
         if name == 'web.template':
+            assert result.testsRun == cases and not result.failures and not result.errors
+            assert result.wasSuccessful()
+        elif name == 'web.db':
             assert result.testsRun == cases and not result.failures and not result.errors
             assert result.wasSuccessful()
         else:
@@ -322,10 +325,12 @@ def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples
     record_property('probe_stdout', result.stdout)
     record_property('probe_stderr', result.stderr)
     record_property('child_returncode', result.returncode)
-    assert result.returncode == (0 if name == 'web.template' else 1), result.stdout + result.stderr
+    assert result.returncode == (0 if name in ('web.template', 'web.db') else 1), result.stdout + result.stderr
     evidence = json.loads(result.stdout.splitlines()[-1])
     assert evidence['module'] == name and evidence['executed_cases'] == cases
     if name == 'web.template':
+        assert evidence['failed_case_ids'] == [] and evidence['nested_doctests_passed'] is True
+    elif name == 'web.db':
         assert evidence['failed_case_ids'] == [] and evidence['nested_doctests_passed'] is True
     else:
         assert evidence['failed_case_ids'] and evidence['nested_doctests_passed'] is False

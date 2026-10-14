@@ -722,3 +722,24 @@ assert condition.values() == ["O'Reilly"]
 - [`session.md`](session.md) - Session management with database-backed storage (DBStore)
 - [`webapi.md`](webapi.md) - Web API including context and cookie management
 - [`utils.md`](utils.md) - Utility functions used by the database module
+
+## Testing the DB module
+
+From an environment where this `web` package is importable, `python -m web.db`
+runs the module's doctests, then `test_parser()` and `test_safeeval()` in that
+order. On the audited Python 3.13 environment, the doctests execute 83 examples
+in 23 cases and pass. The two SQLite URL expectations follow dictionary
+insertion order; URL parsing and dictionary values are unchanged.
+
+The CLI exits 0 when the doctests and both helper checks succeed, or 1 when a
+doctest fails. Both helpers still run after a doctest failure. Their own
+assertions and exceptions propagate normally: if `test_parser()` raises,
+`test_safeeval()` is not reached. Scripts that previously relied on exit 0 even
+with failing doctests must account for the nonzero exit status.
+
+`python -m web.db TestDatabase` runs the same examples and helpers: the argument
+is ignored, not a class selector. Importing `web` can pre-import `web.db`, so
+module execution may print a `RuntimeWarning`; that warning is not a doctest
+failure. These checks require no external database server. See
+[web#34](https://git.home.arpa/mosaic-ai/web/issues/34) and the
+[test-runner reference](test.md) for the distinction between cases and examples.
