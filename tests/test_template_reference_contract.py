@@ -127,9 +127,10 @@ def test_wb10_noop_and_historical_doctests(tmp_path, record_property):
             runner.run(test, out=output.write)
         outcome = runner.summarize(verbose=False)
         assert outcome.attempted > 0 and outcome.failed > 0
-        assert "u'" in output.getvalue()
-        assert 'TemplateResult' in output.getvalue()
-        assert (outcome.failed, outcome.attempted) == (60, 124)
+        assert "KeyError: '__import__'" in output.getvalue()
+        assert {name: stats[:2] for name, stats in runner._stats.items() if stats[0]} == {
+            'web.template.test': (1, 66)}
+        assert (outcome.failed, outcome.attempted) == (1, 124)
         # Separate an actual runtime limitation from obsolete repr expectations.
         import datetime
         date = datetime.datetime(2009, 1, 1)
@@ -147,7 +148,7 @@ def test_wb10_documented_runner_reports_real_failure_exit(tmp_path, record_prope
     assert closed and language == 'python'
     record_property('fence_sha256', hashlib.sha256(code).hexdigest())
     record_property('markdown_line', line)
-    record_property('mode', 'standalone Python; expected historical doctest failure exit 1')
+    record_property('mode', 'standalone Python; expected real strftime doctest failure exit 1')
     program = BOOTSTRAP + "\nns = {'__name__': '__main__'}\nexec(compile(" + repr(code) + ", 'docs/template.md', 'exec'), ns)\n"
     result = subprocess.run([sys.executable, '-I', '-B', '-c', program, str(WEB_ROOT.parent)],
                             cwd=tmp_path, env={'PATH': os.defpath, 'HOME': str(tmp_path),
@@ -157,8 +158,8 @@ def test_wb10_documented_runner_reports_real_failure_exit(tmp_path, record_prope
     record_property('probe_stderr', result.stderr)
     record_property('child_returncode', result.returncode)
     assert result.returncode == 1, result.stdout + result.stderr
-    assert 'TestResults(failed=60, attempted=124)' in result.stdout
-    assert result.stderr == "<doctest web.template.test[44]>:1: SyntaxWarning: invalid escape sequence '\\$'\n  t(\"Stop, \\$money isn't evaluated.\")()\n"
+    assert 'TestResults(failed=1, attempted=124)' in result.stdout
+    assert result.stderr == ''
     assert "KeyError: '__import__'" in result.stdout
 
 

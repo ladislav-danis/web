@@ -639,20 +639,27 @@ print(result)
 raise SystemExit(1 if result.failed else 0)
 ```
 
-This is a diagnostic runner, **not a green quickstart**. On the tested Python
-3.13 snapshot it attempts 124 examples and reports 60 failures (exit 1).
-Historical expected `u'...'` representations, the `TestResult.__repr__` helper
-returning body text rather than `repr(body)`, old exception wording, and the
-malformed `python_lookahead('else:')` expected text need separate source-doctest
-maintenance. `TemplateResult` and `read_var` repr expectations are also stale.
-There is additionally a real `date.strftime(...)` failure (`KeyError:
-'__import__'`) under the restricted mapping, and a historical `\$` literal emits
-`SyntaxWarning`; the runner preserves both diagnostics. Format dates in trusted
-application Python and pass the resulting text rather than adding `__import__`
-to template builtins. This limitation needs separate source investigation.
-Do not treat these failures as repaired here or run unrelated database doctests.
-The module's `__main__` calls `doctest.testmod()` without propagating its result
-as the process exit code; prefer the explicit exit check above for automation.
+This is a diagnostic runner, **not a green quickstart**. On the tested CPython
+3.13.5 snapshot it attempts all 124 examples in 18 doctest cases and reports
+1 failure (exit 1). The obsolete Python 2 repr prefixes, malformed expected
+literal, helper representation and exception messages have been updated; the
+exception wording is that of modern CPython (verified here on 3.13.5), not a
+promise that exact messages match every older interpreter. The dollar-escape
+example uses a raw string with the same runtime text and no invalid-escape warning.
+
+The remaining `date.strftime(...)` example still expects the successful date
+output, but actually raises `KeyError: '__import__'` under the restricted builtins.
+This real runtime defect is tracked separately as web#33; it is not skipped or
+redefined as an expected exception. Format dates in trusted application Python
+and pass the resulting text rather than adding `__import__` to template builtins.
+Do not treat the nested doctest suite as green or run unrelated database doctests.
+
+`python -m web.template` now exits with status 0 when all its doctests pass and
+status 1 when any fail, just like the explicit runner above. Consequently the
+current snapshot exits 1; scripts relying on its former always-zero status must
+handle failures. `-v` displays the actual example inventory and results.
+The `--compile <directory>` branch is unchanged: it compiles templates instead of
+running doctests. The no-op `web.template.test()` API is also unchanged.
 
 ### Constants
 
