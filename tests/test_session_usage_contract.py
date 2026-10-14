@@ -122,11 +122,12 @@ if scenario == 'missing':
         assert store[replacement]['visits'] == 1 and len(store.d_store) == 1
         assert events == ['handler'] and not errors
     else:
-        assert response.status == '500 Internal Server Error'
-        assert response.data == b'internal server error'
-        assert errors == [('KeyError', ('ip',))], errors
-        assert "KeyError: 'ip'" in log.getvalue()
-        assert not cookie(response) and not store.d_store and not events
+        assert response.status == '400 Bad Request'
+        assert response.data == b'Expired outside GET'
+        assert not errors and "KeyError: 'ip'" not in log.getvalue()
+        expired_cookie = cookie(response)['webpy_session_id']
+        assert expired_cookie.value == sid and expired_cookie['expires']
+        assert not store.d_store and events == ['outer-catch']
 else:
     before = dict(store[sid])
     response = request(sid, ip='192.0.2.2')

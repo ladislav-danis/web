@@ -180,10 +180,6 @@ class Session:
                 return self.expired()
 
     def _save(self):
-        current_values = dict(self._data)
-        del current_values["session_id"]
-        del current_values["ip"]
-
         if not self.get("_killed"):
             self._setcookie(self.session_id)
             self.store[self.session_id] = dict(self._data)

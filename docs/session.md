@@ -30,7 +30,7 @@ and clean them up, so they are not persistent deployment stores. A deployed stor
 needs an application-owned protected path and lifecycle instead. Signatures, data
 shapes and handler fragments are reference material, not standalone programs.
 The usage examples below exercise real offline requests, not authentication.
-Unchanged runtime limitations (missing-record expiry, direct iteration and shared
+Unchanged runtime limitations (direct iteration and shared
 MemoryStore interleavings) are called out separately; passing examples do not fix them.
 Signatures and data-shape fences remain non-executable reference material.
 
@@ -39,8 +39,8 @@ Signatures and data-shape fences remain non-executable reference material.
 ### `SessionExpired`
 
 An expiry exception derived from `web.HTTPError`, with status `200 OK` and the
-configured expired message as data. Not every expiry path reaches this exception:
-see the [missing-record limitation and outer-processor example](#session-expiration-handling).
+configured expired message as data. Missing records with `ignore_expiry=False`
+reach this exception before the handler; see the [outer-processor example](#session-expiration-handling).
 
 #### Constructor
 ```python
@@ -170,7 +170,7 @@ initializer, then sets the current IP. Configure an unauthenticated/guest initia
 and keep application authentication/authorization gates in place: no old identity,
 permissions, CSRF token or other legacy fields are imported. This recovery applies
 with either `ignore_expiry` value when the legacy record exists; it does not use
-`expired()` or fix the separate missing-record limitation. Normal response saving
+`expired()`; missing-record expiry is a separate path. Normal response saving
 sets the replacement cookie and writes a **new** signed record. The old payload is
 not rewritten or deleted by rejection, and retrying its cookie cannot authenticate
 from it. `DBStore.__getitem__` still updates `atime` **before** decoding, so even a
@@ -614,14 +614,16 @@ subclasses (including `SessionExpired`) through outer processors; ordinary error
 are converted to HTTP 500 at the inner processor boundary.
 
 With `ignore_expiry=True` (the default), a cookie whose record is absent starts a
-new session. **Current limitation:** with `ignore_expiry=False`, that missing record
-calls `expired()` before `ip` has been loaded. Its `_save()` raises `KeyError('ip')`
-before `SessionExpired`, producing HTTP 500 with no replacement/deletion cookie.
-An outer `SessionExpired` catch does not repair this bug; do not broadly catch
-`KeyError` or all exceptions and turn failures into successful/authenticated requests.
+new initialized session with a new ID. With `ignore_expiry=False`, a previously
+issued cookie whose record is missing reaches `SessionExpired` before the handler.
+The response expires that cookie and does not recreate the missing record. Without
+an outer processor choosing another HTTP policy, the response retains the existing
+`200 OK` status and configured expired-message body; raising `SessionExpired` alone
+does not select an error status. Do not broadly catch `KeyError` or all exceptions
+and turn unrelated failures into successful/authenticated requests.
 
-An existing record with a changed IP and `ignore_change_ip=False` does reach
-`SessionExpired`, because the saved `ip` was loaded. The following bounded example
+An existing record with a changed IP and `ignore_change_ip=False` also reaches
+`SessionExpired`. The following bounded example
 handles **that** path, changes its default 200 to an explicit 400, and proves GET
 was not called. `expired()` marks the cookie for expiry but does not delete the
 existing stored record. There is no authentication or authorization in this demo.
@@ -754,7 +756,7 @@ with TemporaryDirectory() as root:
 2. **Automatic Cleanup**: Periodic removal of expired sessions based on timeout
 3. **IP Validation**: Optional protection against IP address changes (configurable)
 4. **Cookie Management**: Automatic session cookie handling with security flags (HttpOnly, Secure, SameSite)
-5. **Expiration Handling**: Configurable timeout/reset policy; the missing-record error path above is not graceful
+5. **Expiration Handling**: Configurable timeout/reset policy; choose an explicit outer-processor HTTP policy when the default expiry status is unsuitable
 6. **Thread-local Data**: Uses `threadeddict` for per-thread request state, not locking or transactions across shared-store operations
 7. **Flexible Initialization**: Support for custom session initialization functions or dictionaries
 8. **Python Version**: The current package import chain includes session f-strings and function annotations, requiring Python 3 syntax. Python 2 was not executed or certified; this is not a guarantee for every Python 3 release
