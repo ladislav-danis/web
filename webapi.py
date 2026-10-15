@@ -581,8 +581,7 @@ def cookies(*requireds, **defaults):
     try:
         return storify(ctx._parsed_cookies, *requireds, **defaults)
     except KeyError:
-        badrequest()
-        raise StopIteration()
+        raise badrequest()
 
 
 def debug(*args):

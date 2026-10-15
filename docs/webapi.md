@@ -353,7 +353,7 @@ require the listed cookie names. Parsed cookie values are untrusted input, not
 proof of authentication.
 
 **Parameters:**
-- `*requireds` (str): Positional required names, but see the current exception limitation below. Present empty values satisfy this presence check.
+- `*requireds` (str): Required cookie names. Raises `BadRequest` when absent, even if that name also has a default. Present empty values satisfy this presence check.
 - `**defaults`: Default values for optional cookies
   - `_unicode` (bool): Unicode conversion option (default: False, unlike `input()`)
   - Other keys: Default values for cookies
@@ -361,17 +361,19 @@ proof of authentication.
 **Returns:**
 - `storage`: Storage object with cookie data
 
-**Current exception limitation (source fix tracked in [web#36](https://git.home.arpa/mosaic-ai/web/issues/36); reference scope WB-WEBAPI-03):**
-A missing positional name is checked before defaults. It constructs `badrequest()`
-(setting request status to 400) but raises `StopIteration`, **not `BadRequest`**.
-An ordinary handler consequently produces HTTP 500; inside a generator Python's
-PEP 479 converts the escaping exception to `RuntimeError`. Do not rely on the
-intermediate status to deliver an HTTP 400 response.
+**Missing required cookies (reference scope WB-WEBAPI-03):**
+A missing positional name raises `BadRequest` before defaults are applied.
+Let it propagate: the default application returns HTTP 400 with body `bad request`
+from an ordinary handler or a returned generator before its first chunk and
+`start_response`. After the response has started, or if application code catches
+and overrides the error, this does not guarantee replacement of the HTTP status.
+Presence checks do not require nonempty values or authenticate a cookie.
 
 **Example (standalone, explicit application-level check):**
-Avoid that positional-cookie path: read without required names, check membership,
-then raise `web.badrequest` yourself. The separate nonempty check is an example
-application policy; this is not session verification or authentication.
+This example reads without required names and checks membership explicitly to
+provide its own error message. The separate nonempty check is an application
+policy beyond positional presence checking; neither is session verification or
+authentication.
 
 ```python
 import web

@@ -193,17 +193,18 @@ class Index:
             return body()
         try:
             result = web.cookies('session_id', 'user_id', session_id='fallback')
-        except StopIteration:
+        except web.BadRequest:
             observed.append(web.ctx.status)
             raise
         return json.dumps(dict(result))
 app = web.application(('/', Index), {}, autoreload=False)
 with contextlib.redirect_stderr(io.StringIO()) as log:
     if mode == 'generator':
-        error = raises(RuntimeError, lambda: app.request('/'))
-        assert isinstance(error.__cause__, StopIteration)
-        print(json.dumps({'mode': mode, 'exception': type(error).__name__,
-                          'cause': type(error.__cause__).__name__}))
+        response = app.request('/')
+        assert response.status == '400 Bad Request'
+        assert response.data == b'bad request'
+        assert log.getvalue() == ''
+        print(json.dumps({'mode': mode, 'status': response.status}))
     else:
         response = app.request('/')
         if mode == 'keyword':
@@ -211,9 +212,9 @@ with contextlib.redirect_stderr(io.StringIO()) as log:
             assert json.loads(response.data) == {'required': ['session_id', 'user_id']}
         else:
             assert observed == ['400 Bad Request']
-            assert response.status == '500 Internal Server Error'
-            assert response.data == b'internal server error'
-            assert 'StopIteration' in log.getvalue()
+            assert response.status == '400 Bad Request'
+            assert response.data == b'bad request'
+            assert log.getvalue() == ''
         print(json.dumps({'mode': mode, 'status': response.status, 'observed': observed}))
 for header in ('session_id=; user_id=', 'session_id=example; user_id=7'):
     response = app.request('/', headers={'Cookie': header})
