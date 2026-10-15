@@ -1224,16 +1224,34 @@ def compile_templates(root):
             text = Template.normalize_text(text)
             code = Template.generate_code(text, path)
 
-            code = code.replace("__template__", name, 1)
-
-            out.write(code)
-
-            out.write("\n\n")
-            out.write(f"{name} = CompiledTemplate({name}, {repr(path)})\n")
-            out.write(f"join_ = {name}._join; escape_ = {name}._escape\n\n")
-
-            # create template to make sure it compiles
+            # Validate before wrapping the generated function, as for Template.
             Template(open(path, encoding="utf-8").read(), path)
+
+            # A factory gives each function its own helper cells while retaining
+            # the live module globals used by GAE_Render and nested templates.
+            # Indent code, but not the contents of multiline string literals.
+            lines = code.split("\n")
+            tokens = tokenize.generate_tokens(iter(line + "\n" for line in lines).__next__)
+            string_lines = {
+                row
+                for t in tokens
+                if token.tok_name[t.type] in ("STRING", "FSTRING_MIDDLE")
+                for row in range(t.start[0] + 1, t.end[0] + 1)
+            }
+            code = "\n".join(
+                line if row in string_lines else "    " + line
+                for row, line in enumerate(lines, 1)
+            )
+            out.write(f"def {name}():\n")
+            # Defaults can call or retain helpers: bind the final owner first.
+            out.write(f"    __compiled__ = CompiledTemplate(None, {path!r})\n")
+            out.write("    join_ = __compiled__._join; escape_ = __compiled__._escape\n")
+            out.write(f"{code}\n\n")
+            out.write(f"    __template__.__name__ = {name!r}\n")
+            out.write(f"    __template__.__qualname__ = {name!r}\n")
+            out.write("    __compiled__.t = __template__\n")
+            out.write("    return __compiled__\n")
+            out.write(f"{name} = {name}()\n\n")
         out.close()
 
 

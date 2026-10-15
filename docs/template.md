@@ -506,7 +506,7 @@ assert not root.exists()
 
 Template class for pre-compiled templates.
 
-- `__init__(f, filename)` - Initializes with a pre-compiled function
+- `__init__(f, filename)` - Initializes with a pre-compiled callable, retaining that callable and its argument, return and exception behavior. It does not rewrite caller-owned function globals or closures.
 
 #### `Render`
 
@@ -602,7 +602,21 @@ assert splitline('') == ('', '')
 
 Compiles all templates in a directory to Python code.
 
-Creates `__init__.py` files with compiled templates for faster loading.
+Creates `__init__.py` files with compiled templates for faster loading. Each
+newly compiled template binds its own `join_` and `escape_` helpers in a closure;
+compilation order therefore does not make `.html` templates inherit a `.txt`
+filter, or vice versa. The existing suffix policy still applies: `.html`,
+`.xhtml` and `.xml` use HTML escaping, while `.txt` and unknown suffixes are plain.
+`$:` still bypasses the filter. Changing a compiled template's `filter` affects
+that instance, not its neighbours. Other names retain live module-global lookup,
+including globals injected by `GAE_Render` and calls to other compiled templates.
+
+**Recompile existing generated modules after upgrading.** Older `__init__.py`
+files still contain shared module-global helpers; importing them with the new
+runtime alone does not repair their mixed-suffix escaping. This compiler change
+does not alter `Template`/directory `Render`, the AST validation policy, or the
+existing absolute child imports emitted for nested template directories. Template
+source and generated Python remain trusted application code, not a sandbox.
 
 #### `frender(path, **keywords)`
 
