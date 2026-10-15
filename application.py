@@ -255,6 +255,8 @@ class application:
             # if not env.get('CONTENT_TYPE', '').lower().startswith('multipart/') and 'CONTENT_LENGTH' not in env:
             if "CONTENT_LENGTH" not in env:
                 env["CONTENT_LENGTH"] = len(body)
+        elif "wsgi.input" not in env:
+            env["wsgi.input"] = BytesIO()
         response = web.storage()
 
         def start_response(status, headers):
