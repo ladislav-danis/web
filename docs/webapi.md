@@ -214,6 +214,15 @@ For URL-encoded GET/POST data, supplied values remain strings; a default such as
 the last value unless a list default (for example `tags=[]`) requests all values.
 The default combined mode lets body parameters override same-named query parameters.
 
+Multipart uploads keep their bytes when their field is required, including an
+empty upload. A dictionary default preserves the selected upload object instead
+of reading it; a list default wraps a single selected upload's bytes. In this
+parser path, repeated multipart fields have already been reduced to the last
+part before `storify` runs: a list default does not recover earlier parts. This
+is distinct from the URL-encoded lists above. Each key is converted once per
+`input()` call; separate calls or different keys sharing a stream do not imply
+rewinding, and upload bytes are not automatically decoded into text.
+
 **Parameters:**
 - `*requireds` (str): Required parameter names. Raises `BadRequest` if absent from the parsed request, even if that name also has a default. Present empty strings pass.
 - `**defaults`: Default values for optional parameters
@@ -554,8 +563,8 @@ policies, not `input()` defaults. The username is checked with `strip()` but kep
 unchanged; passwords are not stripped (a whitespace-only password is nonempty).
 This is a parsing/validation demonstration for URL-encoded text GET/POST, not an
 authentication endpoint or an upload validator. Multipart values require a separate
-application type/error policy; the required-upload double-read source defect is
-tracked in [web#37](https://git.home.arpa/mosaic-ai/web/issues/37).
+application type/error policy. Marking an existing upload as required preserves
+its bytes; it does not decode them or make them suitable for text-only validation.
 
 ```python
 import json

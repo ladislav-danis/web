@@ -169,6 +169,8 @@ def storify(mapping: Dict[str, Any], *requireds: str, **defaults: Any) -> Storag
 
     stor = Storage()
     for key in requireds + tuple(mapping.keys()):
+        if key in stor:
+            continue
         value = mapping[key]
         if isinstance(value, list):
             if isinstance(defaults.get(key), list):

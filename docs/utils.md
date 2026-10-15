@@ -85,6 +85,18 @@ Creates a `storage` object from a dictionary, handling special cases like lists 
 - A nonempty list item becomes its last element unless its default is a list.
 - An object with a `value` attribute becomes that value unless its default is
   a dictionary (file-like values with `file` and `raw` have special handling).
+- Each key is processed once: required names first, then remaining mapping keys,
+  in first-occurrence order. Repeating a required name does not repeat conversion;
+  a missing required key still raises `KeyError`, even with a default.
+- A selected object with both `file` and `raw` is converted with `file.read()`
+  from its current position; bytes are not automatically decoded. A dictionary
+  default preserves the selected object without this conversion or a data read.
+  For a plain list, a dictionary default still selects its last element; a list
+  default converts every element and keeps the resulting list.
+- No rewind or deduplication by object identity is performed. Different keys
+  sharing one stream consume it separately. Attribute getters (including a
+  `raw` property) retain their own behavior, so one key conversion is not a
+  guarantee of one low-level stream read.
 
 **Examples:**
 ```python
