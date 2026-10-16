@@ -225,7 +225,7 @@ python runner_sample.py NoSuchClass
 
 This diagnostic only builds suites and counts examples; it does not run them.
 On this pinned revision, `web.db` has 23 DocTestCases / 83 examples,
-`web.template` 18 / 124, and `web.form` 22 / 45. Thus the old db+template unit
+`web.template` 18 / 124, and `web.form` 22 / 46. Thus the old db+template unit
 suite is empty, while their doctest suite has 41 cases, not 41 examples. The old
 custom suite only ran the added form doctests. Counts may change with source.
 
@@ -247,7 +247,7 @@ Template doctests pass all 124 examples in 18 cases after
 [web#32](https://git.home.arpa/mosaic-ai/web/issues/32) and application-side date
 formatting in [web#33](https://git.home.arpa/mosaic-ai/web/issues/33); direct
 restricted-template `strftime` remains unsupported. Form doctests now execute
-and pass all 45 examples in 22 cases after correcting Python 2 string-repr
+and pass all 46 examples in 22 cases after correcting Python 2 string-repr
 expectations ([web#35](https://git.home.arpa/mosaic-ai/web/issues/35)); rendered
 HTML and form runtime behavior are unchanged. These three nonempty suites pass;
 this is not a claim about every other framework docstring. Failing cases and
@@ -257,7 +257,7 @@ The DB module CLI returns 1 for doctest failure and 0 for success, after its
 parser and safe-eval checks; `TestDatabase` is still ignored, not a class
 selector. This supersedes the historical always-zero DB warning under Command
 Line Usage above. The form module CLI likewise returns 0 for passing doctests
-and 1 for doctest failure; it runs all 45 examples without an argument or with
+and 1 for doctest failure; it runs all 46 examples without an argument or with
 an ignored positional argument such as `Form`, not a class selection. This
 changes the old always-zero form CLI behavior on failure. It does not change
 `web.test.runTests`: a custom script that ignores its returned unsuccessful

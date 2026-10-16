@@ -554,8 +554,8 @@ class Search(Input):
 
     See: <https://html.spec.whatwg.org/#text-(type=text)-state-and-search-state-(type=search)>
 
-    >> Search(name='search', value='Search').render()
-    u'<input id="search" name="search" type="search" value="Search"/>'
+    >>> Search(name='search', value='Search').render()
+    '<input id="search" name="search" type="search" value="Search"/>'
     >>> Search(name='search', value='Search', required='required', pattern='[a-z0-9]{2,30}', placeholder='Search...').render()
     '<input id="search" name="search" pattern="[a-z0-9]{2,30}" placeholder="Search..." required="required" type="search" value="Search"/>'
 

@@ -289,7 +289,7 @@ def test_all_fences_have_an_execution_mode():
     assert all(closed for _, _, _, _, closed in blocks)
 
 
-@pytest.mark.parametrize('name,cases,examples', [('web.db', 23, 83), ('web.template', 18, 124), ('web.form', 22, 45)])
+@pytest.mark.parametrize('name,cases,examples', [('web.db', 23, 83), ('web.template', 18, 124), ('web.form', 22, 46)])
 def test_pinned_framework_doctests_are_failing_diagnostics(name, cases, examples, tmp_path, record_property):
     # Historical ID retained: db/template/form now have nonempty passing doctests.
     source = '''

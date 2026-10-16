@@ -57,9 +57,27 @@ for case in cases:
         rows.append(dict(name=case.name, ordinal=ordinal, source=e.source, want=want,
                          exc_msg=e.exc_msg, options=e.options))
 # Pin all identities, preparatory sources, exceptions and options. Only the
-# display of the 39 HTML string wants is canonicalized to its exact value;
+# display of the 40 HTML string wants is canonicalized to its exact value;
 # the actual runner below still uses the unmodified default output checker.
-assert hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest() == '9c084d2220596e5f45262b6a1696c673b0493ad9071c48e7ec09b0cd66d7afd0'
+assert hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest() == '9a39274eeac0dd8d8e5192df57ebeb11e802ef1af2a083489169ee928e938411'
+# Preserve all 45 previous examples, not just the larger inventory count.
+# Only the newly collected simple Search is added; advanced Search moves 0 -> 1.
+assert len(rows) == 46
+assert len({(r['name'], r['ordinal']) for r in rows}) == 46
+simple = [r for r in rows if (r['name'], r['ordinal']) == ('web.form.Search', 0)]
+assert len(simple) == 1
+assert simple[0]['source'] == "Search(name='search', value='Search').render()\n"
+previous = []
+for row in rows:
+    if row is simple[0]:
+        continue
+    old = dict(row)
+    if old['name'] == 'web.form.Search':
+        assert old['ordinal'] == 1
+        old['ordinal'] = 0
+    previous.append(old)
+assert len(previous) == 45
+assert hashlib.sha256(json.dumps(previous, sort_keys=True).encode()).hexdigest() == '9c084d2220596e5f45262b6a1696c673b0493ad9071c48e7ec09b0cd66d7afd0'
 observed = []
 class Capture(doctest.DocTestRunner):
     def record(self, test, example, got):
@@ -83,7 +101,7 @@ report(cases=[t.name for t in cases], attempted=runner.tries, failed=runner.fail
 ''', tmp_path, record_property)
     assert result.returncode == 0, result.stdout + result.stderr
     assert len(data['cases']) == len(set(data['cases'])) == 22
-    assert data['attempted'] == len(data['observations']) == 45
+    assert data['attempted'] == len(data['observations']) == 46
     assert data['failed'] == 0, result.stdout
 
 
@@ -116,8 +134,8 @@ def copy_package(tmp_path):
 
 
 def check_run(data, failures):
-    assert (data['attempted'], data['failed'], len(data['cases'])) == (45, failures, 22)
-    assert sum(stats[1] for stats in data['cases'].values()) == 45
+    assert (data['attempted'], data['failed'], len(data['cases'])) == (46, failures, 22)
+    assert sum(stats[1] for stats in data['cases'].values()) == 46
     assert sum(stats[0] for stats in data['cases'].values()) == failures
     assert all(len(stats) < 3 or stats[2] == 0 for stats in data['cases'].values())
 
