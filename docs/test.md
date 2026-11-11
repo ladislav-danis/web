@@ -242,13 +242,13 @@ for module in web.test.load_modules(['web.db', 'web.template', 'web.form']):
 ```
 
 On the audited Python 3.13 environment, the DB doctests pass all 83 examples
-in 23 DocTestCases ([web#34](https://git.home.arpa/mosaic-ai/web/issues/34)).
+in 23 DocTestCases (`web#34`).
 Template doctests pass all 124 examples in 18 cases after
-[web#32](https://git.home.arpa/mosaic-ai/web/issues/32) and application-side date
-formatting in [web#33](https://git.home.arpa/mosaic-ai/web/issues/33); direct
+`web#32` and application-side date
+formatting in `web#33`; direct
 restricted-template `strftime` remains unsupported. Form doctests now execute
 and pass all 46 examples in 22 cases after correcting Python 2 string-repr
-expectations ([web#35](https://git.home.arpa/mosaic-ai/web/issues/35)); rendered
+expectations (`web#35`); rendered
 HTML and form runtime behavior are unchanged. These three nonempty suites pass;
 this is not a claim about every other framework docstring. Failing cases and
 failing examples remain different units.

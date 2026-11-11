@@ -936,7 +936,7 @@ assignments, including elements nested in tuple/list unpacking targets, are
 rejected with `SecurityError` at construction time. Augmented assignments also
 validate their target subexpressions and right-hand side. This repairs the
 assignment-target and traversal defect tracked in
-[web#30](https://git.home.arpa/mosaic-ai/web/issues/30).
+`web#30`.
 
 Local single/chained assignments, local augmented assignments and local
 non-starred tuple/list unpacking remain supported. Starred unpacking remains

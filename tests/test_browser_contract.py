@@ -5,7 +5,7 @@ original str/urllib boundary node IDs below intentionally remain unchanged.
 Source repair web#22 replaces the four A-008 callable-link limitations one-to-one
 with desired-success regressions. web#23 replaces A-009 one-to-one with exact
 binary save, closed-file and intercepted single-launch regression coverage.
-See https://git.home.arpa/mosaic-ai/web/issues/3 for historical tracking.
+Historical tracking reference: web#3 (original browser audit).
 A future source repair must replace each affected limitation assertion with a
 one-to-one reconciled desired-contract regression, not silently delete coverage.
 All probes use actual framework requests in fresh Core/network-denied processes.

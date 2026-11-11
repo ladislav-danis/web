@@ -741,5 +741,5 @@ with failing doctests must account for the nonzero exit status.
 is ignored, not a class selector. Importing `web` can pre-import `web.db`, so
 module execution may print a `RuntimeWarning`; that warning is not a doctest
 failure. These checks require no external database server. See
-[web#34](https://git.home.arpa/mosaic-ai/web/issues/34) and the
+`web#34` and the
 [test-runner reference](test.md) for the distinction between cases and examples.
